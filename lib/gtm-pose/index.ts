@@ -15,16 +15,9 @@
  * =============================================================================
  */
 
-export {
-    Metadata,
-    ClassifierInputSource,
-    CustomPoseNet,
-    load,
-    loadFromFiles
-} from './custom-posenet';
+export { type Metadata, type ClassifierInputSource, CustomPoseNet, load, loadFromFiles } from './custom-posenet';
 
 export { TeachablePoseNet, createTeachable } from './teachable-posenet';
-export { Webcam } from './utils/webcam';
-export { createCanvas } from './utils/canvas';
+export { createCanvas } from '../gtm-utils/canvas';
 export { drawKeypoints, drawSkeleton, drawPoint, drawSegment } from './utils/pose-draw';
 export { version } from './version';

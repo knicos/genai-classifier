@@ -16,15 +16,15 @@
  */
 
 import * as tf from '@tensorflow/tfjs';
-import { util, SymbolicTensor } from '@tensorflow/tfjs';
+import { SymbolicTensor } from '@tensorflow/tfjs';
 import { dispose } from '@tensorflow/tfjs';
 import { capture } from './utils/tf';
-import { cropTo } from './utils/canvas';
+import { cropTo } from '../gtm-utils/canvas';
 import { version } from './version';
 
 const DEFAULT_MOBILENET_VERSION = 1;
 const DEFAULT_TRAINING_LAYER_V1 = 'conv_pw_13_relu';
-const DEFAULT_TRAINING_LAYER_V2 = "out_relu"; 
+const DEFAULT_TRAINING_LAYER_V2 = 'out_relu';
 const DEFAULT_ALPHA_V1 = 0.25;
 const DEFAULT_ALPHA_V2 = 0.35;
 export const IMAGE_SIZE = 224;
@@ -43,7 +43,7 @@ export interface Metadata {
     modelName?: string;
     timeStamp?: string;
     labels: string[];
-    userMetadata?: {};
+    userMetadata?: unknown;
     grayscale?: boolean;
     imageSize?: number;
 }
@@ -73,21 +73,20 @@ const fillMetadata = (data: Partial<Metadata>) => {
 };
 
 // tslint:disable-next-line:no-any
-const isMetadata = (c: any): c is Metadata =>
-    !!c && Array.isArray(c.labels);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const isMetadata = (c: any): c is Metadata => !!c && Array.isArray(c.labels);
 
 const isAlphaValid = (version: number, alpha: number) => {
     if (version === 1) {
         if (alpha !== 0.25 && alpha !== 0.5 && alpha !== 0.75 && alpha !== 1) {
-            console.warn("Invalid alpha. Options are: 0.25, 0.50, 0.75 or 1.00.");
-            console.log("Loading model with alpha: ", DEFAULT_ALPHA_V1.toFixed(2)); 
+            console.warn('Invalid alpha. Options are: 0.25, 0.50, 0.75 or 1.00.');
+            console.log('Loading model with alpha: ', DEFAULT_ALPHA_V1.toFixed(2));
             return DEFAULT_ALPHA_V1;
         }
-    }
-    else {
+    } else {
         if (alpha !== 0.35 && alpha !== 0.5 && alpha !== 0.75 && alpha !== 1) {
-            console.warn("Invalid alpha. Options are: 0.35, 0.50, 0.75 or 1.00.");
-            console.log("Loading model with alpha: ", DEFAULT_ALPHA_V2.toFixed(2)); 
+            console.warn('Invalid alpha. Options are: 0.35, 0.50, 0.75 or 1.00.');
+            console.log('Loading model with alpha: ', DEFAULT_ALPHA_V2.toFixed(2));
             return DEFAULT_ALPHA_V2;
         }
     }
@@ -96,41 +95,44 @@ const isAlphaValid = (version: number, alpha: number) => {
 };
 
 const parseModelOptions = (options?: ModelOptions) => {
-    options = options || {}
+    options = options || {};
 
     if (options.checkpointUrl && options.trainingLayer) {
-        if (options.alpha || options.version){
-            console.warn("Checkpoint URL passed to modelOptions, alpha options are ignored");
-        }        
+        if (options.alpha || options.version) {
+            console.warn('Checkpoint URL passed to modelOptions, alpha options are ignored');
+        }
         return [options.checkpointUrl, options.trainingLayer];
     } else {
         options.version = options.version || DEFAULT_MOBILENET_VERSION;
-        
-        if(options.version === 1){
-            options.alpha = options.alpha || DEFAULT_ALPHA_V1;  
+
+        if (options.version === 1) {
+            options.alpha = options.alpha || DEFAULT_ALPHA_V1;
             options.alpha = isAlphaValid(options.version, options.alpha);
 
             console.log(`Loading mobilenet ${options.version} and alpha ${options.alpha}`);
 
             return [
-                // tslint:disable-next-line:max-line-length        
-                `${options.modelBaseUrl || MODEL_BASE_URL}/mobilenet_v1_${options.alpha.toFixed(2).replace('.', '')}_${IMAGE_SIZE}/model.json`,
-                DEFAULT_TRAINING_LAYER_V1
+                // tslint:disable-next-line:max-line-length
+                `${options.modelBaseUrl || MODEL_BASE_URL}/mobilenet_v1_${options.alpha
+                    .toFixed(2)
+                    .replace('.', '')}_${IMAGE_SIZE}/model.json`,
+                DEFAULT_TRAINING_LAYER_V1,
             ];
-        }
-        else if (options.version === 2){
-            options.alpha = options.alpha || DEFAULT_ALPHA_V2;  
+        } else if (options.version === 2) {
+            options.alpha = options.alpha || DEFAULT_ALPHA_V2;
             options.alpha = isAlphaValid(options.version, options.alpha);
 
             console.log(`Loading mobilenet ${options.version} and alpha ${options.alpha}`);
             return [
-                // tslint:disable-next-line:max-line-length        
-                `${options.modelBaseUrl || MODEL_BASE_URL}/mobilenet_v2_${options.alpha.toFixed(2).replace('.', '')}_${IMAGE_SIZE}/model.json`,
-                DEFAULT_TRAINING_LAYER_V2
+                // tslint:disable-next-line:max-line-length
+                `${options.modelBaseUrl || MODEL_BASE_URL}/mobilenet_v2_${options.alpha
+                    .toFixed(2)
+                    .replace('.', '')}_${IMAGE_SIZE}/model.json`,
+                DEFAULT_TRAINING_LAYER_V2,
             ];
         } else {
             throw new Error(`MobileNet V${options.version} doesn't exist`);
-        }   
+        }
     }
 };
 
@@ -153,7 +155,6 @@ const processMetadata = async (metadata: string | Metadata) => {
 
 export type ClassifierInputSource = HTMLImageElement | HTMLCanvasElement | HTMLVideoElement | ImageBitmap;
 
-
 /**
  * Computes the probabilities of the topK classes given logits by computing
  * softmax to get probabilities and then sorting the probabilities.
@@ -161,41 +162,40 @@ export type ClassifierInputSource = HTMLImageElement | HTMLCanvasElement | HTMLV
  * @param topK The number of top predictions to show.
  */
 export async function getTopKClasses(labels: string[], logits: tf.Tensor<tf.Rank>, topK = 3) {
-  const values = await logits.data();
-  return tf.tidy(() => {
-      topK = Math.min(topK, values.length);
+    const values = await logits.data();
+    return tf.tidy(() => {
+        topK = Math.min(topK, values.length);
 
-      const valuesAndIndices = [];
-      for (let i = 0; i < values.length; i++) {
-          valuesAndIndices.push({value: values[i], index: i});
-      }
-      valuesAndIndices.sort((a, b) => {
-          return b.value - a.value;
-      });
-      const topkValues = new Float32Array(topK);
-      const topkIndices = new Int32Array(topK);
-      for (let i = 0; i < topK; i++) {
-          topkValues[i] = valuesAndIndices[i].value;
-          topkIndices[i] = valuesAndIndices[i].index;
-      }
+        const valuesAndIndices = [];
+        for (let i = 0; i < values.length; i++) {
+            valuesAndIndices.push({ value: values[i], index: i });
+        }
+        valuesAndIndices.sort((a, b) => {
+            return b.value - a.value;
+        });
+        const topkValues = new Float32Array(topK);
+        const topkIndices = new Int32Array(topK);
+        for (let i = 0; i < topK; i++) {
+            topkValues[i] = valuesAndIndices[i].value;
+            topkIndices[i] = valuesAndIndices[i].index;
+        }
 
-      const topClassesAndProbs = [];
-      for (let i = 0; i < topkIndices.length; i++) {
-          topClassesAndProbs.push({
-              className: labels[topkIndices[i]], //IMAGENET_CLASSES[topkIndices[i]],
-              probability: topkValues[i]
-          });
-      }
-      return topClassesAndProbs;
-  });
+        const topClassesAndProbs = [];
+        for (let i = 0; i < topkIndices.length; i++) {
+            topClassesAndProbs.push({
+                className: labels[topkIndices[i]], //IMAGENET_CLASSES[topkIndices[i]],
+                probability: topkValues[i],
+            });
+        }
+        return topClassesAndProbs;
+    });
 }
-
 
 export class CustomMobileNet {
     /**
      * the truncated mobilenet model we will train on top of
      */
-    protected truncatedModel: tf.LayersModel;
+    protected truncatedModel!: tf.LayersModel;
 
     static get EXPECTED_IMAGE_SIZE() {
         return IMAGE_SIZE;
@@ -206,8 +206,8 @@ export class CustomMobileNet {
         return this._metadata;
     }
 
-    constructor(public model: tf.LayersModel, metadata: Partial<Metadata>) {
-        this._metadata = fillMetadata(metadata);
+    constructor(public model: tf.LayersModel, metadata: Partial<Metadata> | null) {
+        this._metadata = fillMetadata(metadata || {});
     }
 
     /**
@@ -233,7 +233,7 @@ export class CustomMobileNet {
      * @param maxPredictions the maximum number of classification predictions
      */
     async predictTopK(image: ClassifierInputSource, maxPredictions = 10, flipped = false) {
-        const croppedImage = cropTo(image, this._metadata.imageSize, flipped);
+        const croppedImage = cropTo(image, this._metadata.imageSize || 0, flipped);
 
         const logits = tf.tidy(() => {
             const captured = capture(croppedImage, this._metadata.grayscale);
@@ -254,7 +254,7 @@ export class CustomMobileNet {
      * @param flipped whether to flip the image on X
      */
     async predict(image: ClassifierInputSource, flipped = false) {
-        const croppedImage = cropTo(image, this._metadata.imageSize, flipped);
+        const croppedImage = cropTo(image, this._metadata.imageSize || 0, flipped);
 
         const logits = tf.tidy(() => {
             const captured = capture(croppedImage, this._metadata.grayscale);
@@ -267,7 +267,7 @@ export class CustomMobileNet {
         for (let i = 0; i < values.length; i++) {
             classes.push({
                 className: this._metadata.labels[i],
-                probability: values[i]
+                probability: values[i],
             });
         }
 
@@ -289,15 +289,14 @@ export async function loadTruncatedMobileNet(modelOptions?: ModelOptions) {
     const [checkpointUrl, trainingLayer] = parseModelOptions(modelOptions);
     const mobilenet = await tf.loadLayersModel(checkpointUrl);
 
-    if (modelOptions && modelOptions.version === 1){
+    if (modelOptions && modelOptions.version === 1) {
         const layer = mobilenet.getLayer(trainingLayer);
         const truncatedModel = tf.model({ inputs: mobilenet.inputs, outputs: layer.output });
         const model = tf.sequential();
         model.add(truncatedModel);
         model.add(tf.layers.flatten());
         return model;
-    }
-    else {
+    } else {
         const layer = mobilenet.getLayer(trainingLayer);
         const truncatedModel = tf.model({ inputs: mobilenet.inputs, outputs: layer.output });
         const model = tf.sequential();
@@ -307,7 +306,7 @@ export async function loadTruncatedMobileNet(modelOptions?: ModelOptions) {
     }
 }
 
-export async function load(model: string, metadata?: string | Metadata ) {
+export async function load(model: string, metadata?: string | Metadata) {
     const customModel = await tf.loadLayersModel(model);
     const metadataJSON = metadata ? await processMetadata(metadata) : null;
     return new CustomMobileNet(customModel, metadataJSON);

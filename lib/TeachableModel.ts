@@ -46,7 +46,7 @@ export type Metadata = ImageMetadata | PoseMetadata;
 
 const NULLARRAY: string[] = [];
 
-export class TeachableModel {
+export default class TeachableModel {
     private imageModel?: TeachableMobileNet;
     private poseModel?: TeachablePoseNet;
     private _ready?: Promise<boolean>;
@@ -77,7 +77,7 @@ export class TeachableModel {
                     resolve(true);
                 });
             } else if (atype === 'pose') {
-                this.loadPose(metadata, model, weights).then(() => resolve(true));
+                this.loadPose(metadata as PoseMetadata, model, weights).then(() => resolve(true));
             } else {
                 resolve(false);
             }
@@ -287,14 +287,8 @@ export class TeachableModel {
         if (this.imageModel) {
             return this.imageModel.addExample(className, image);
         } else if (this.poseModel) {
-            const { heatmapScores, offsets, displacementFwd, displacementBwd } =
-                await this.poseModel.estimatePoseOutputs(image);
-            const posenetOutput = this.poseModel.poseOutputsToAray(
-                heatmapScores,
-                offsets,
-                displacementFwd,
-                displacementBwd
-            );
+            const { heatmapScores, offsets } = await this.poseModel.estimatePoseOutputs(image);
+            const posenetOutput = this.poseModel.poseOutputsToAray(heatmapScores, offsets);
             return this.poseModel.addExample(className, posenetOutput);
         }
     }

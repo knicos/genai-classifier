@@ -65,6 +65,7 @@
     },
     "dependencies": {
         "@tensorflow/tfjs": "^4.22.0",
+        "autobind-decorator": "^2.4.0",
         "eventemitter3": "^5.0.1",
         "file-saver": "^2.0.5",
         "jszip": "^3.10.1"

@@ -16,17 +16,18 @@
  */
 
 import * as tf from '@tensorflow/tfjs';
-import { util, Rank } from '@tensorflow/tfjs';
+import { util } from '@tensorflow/tfjs';
 import { capture } from './utils/tf';
 import { TensorContainer } from '@tensorflow/tfjs-core/dist/tensor_types';
 import { CustomCallbackArgs } from '@tensorflow/tfjs';
-import { CustomMobileNet,
+import {
+    CustomMobileNet,
     Metadata,
     loadTruncatedMobileNet,
     ClassifierInputSource,
-    ModelOptions
+    ModelOptions,
 } from './custom-mobilenet';
-import * as seedrandom from 'seedrandom';
+import seedrandom from 'seedrandom';
 import { Initializer } from '@tensorflow/tfjs-layers/dist/initializers';
 
 const VALIDATION_FRACTION = 0.15;
@@ -44,8 +45,8 @@ interface Sample {
 }
 
 // tslint:disable-next-line:no-any
-const isTensor = (c: any): c is tf.Tensor =>
-    typeof c.dataId === 'object' && typeof c.shape === 'object';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const isTensor = (c: any): c is tf.Tensor => typeof c.dataId === 'object' && typeof c.shape === 'object';
 
 /**
  * Converts an integer into its one-hot representation and returns
@@ -68,16 +69,15 @@ function fisherYates(array: Float32Array[] | Sample[], seed?: seedrandom.prng) {
     // need to clone array or we'd be editing original as we goo
     const shuffled = array.slice();
 
-    for (let i = (length - 1); i > 0; i -= 1) {
-        let randomIndex ;
+    for (let i = length - 1; i > 0; i -= 1) {
+        let randomIndex;
         if (seed) {
             randomIndex = Math.floor(seed() * (i + 1));
-        }
-        else {
+        } else {
             randomIndex = Math.floor(Math.random() * (i + 1));
         }
 
-        [shuffled[i], shuffled[randomIndex]] = [shuffled[randomIndex],shuffled[i]];
+        [shuffled[i], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[i]];
     }
 
     return shuffled;
@@ -87,15 +87,15 @@ export class TeachableMobileNet extends CustomMobileNet {
     /**
      * the training model for transfer learning
      */
-    protected trainingModel: tf.LayersModel;
+    protected trainingModel!: tf.LayersModel;
 
     /**
      * Training and validation datasets
      */
-    private trainDataset: tf.data.Dataset<TensorContainer>;
-    private validationDataset: tf.data.Dataset<TensorContainer>;
+    private trainDataset!: tf.data.Dataset<TensorContainer>;
+    private validationDataset!: tf.data.Dataset<TensorContainer>;
 
-    private __stopTrainingResolve: () => void;
+    private __stopTrainingResolve?: () => void;
     // private __stopTrainingReject: (error: Error) => void;
 
     // Number of total samples
@@ -105,7 +105,7 @@ export class TeachableMobileNet extends CustomMobileNet {
     public examples: Float32Array[][] = [];
 
     // Optional seed to make shuffling of data predictable
-    private seed: seedrandom.prng;
+    private seed?: seedrandom.prng;
 
     constructor(truncated: tf.LayersModel, metadata: Partial<Metadata>) {
         super(tf.sequential(), metadata);
@@ -116,7 +116,6 @@ export class TeachableMobileNet extends CustomMobileNet {
     public get asSequentialModel() {
         return this.model as tf.Sequential;
     }
-
 
     /**
      * has the teachable model been trained?
@@ -178,7 +177,7 @@ export class TeachableMobileNet extends CustomMobileNet {
      * @param maxPredictions how many of the top results do you want? defautls to 3
      * @param flipped whether to flip an image
      */
-    public async predictTopK(image: ClassifierInputSource, maxPredictions = 10, flipped = false, ) {
+    public async predictTopK(image: ClassifierInputSource, maxPredictions = 10, flipped = false) {
         if (!this.model) {
             throw new Error('Model has not been trained yet, called train() first');
         }
@@ -190,7 +189,7 @@ export class TeachableMobileNet extends CustomMobileNet {
      * into proper tf.data.Dataset
      */
     public prepare() {
-        for (const classes in this.examples){
+        for (const classes in this.examples) {
             if (classes.length === 0) {
                 throw new Error('Add some examples before training');
             }
@@ -242,15 +241,15 @@ export class TeachableMobileNet extends CustomMobileNet {
         trainDataset = fisherYates(trainDataset, this.seed) as Sample[];
         validationDataset = fisherYates(validationDataset, this.seed) as Sample[];
 
-        const trainX = tf.data.array(trainDataset.map(sample => sample.data));
-        const validationX = tf.data.array(validationDataset.map(sample => sample.data));
-        const trainY = tf.data.array(trainDataset.map(sample => sample.label));
-        const validationY = tf.data.array(validationDataset.map(sample => sample.label));
+        const trainX = tf.data.array(trainDataset.map((sample) => sample.data));
+        const validationX = tf.data.array(validationDataset.map((sample) => sample.data));
+        const trainY = tf.data.array(trainDataset.map((sample) => sample.label));
+        const validationY = tf.data.array(validationDataset.map((sample) => sample.label));
 
         // return tf.data dataset objects
         return {
-            trainDataset: tf.data.zip({ xs: trainX,  ys: trainY}),
-            validationDataset: tf.data.zip({ xs: validationX,  ys: validationY})
+            trainDataset: tf.data.zip({ xs: trainX, ys: trainY }),
+            validationDataset: tf.data.zip({ xs: validationX, ys: validationY }),
         };
     }
 
@@ -278,14 +277,14 @@ export class TeachableMobileNet extends CustomMobileNet {
     public async train(params: TrainingParameters, callbacks: CustomCallbackArgs = {}) {
         // Add callback for onTrainEnd in case of early stop
         const originalOnTrainEnd = callbacks.onTrainEnd || (() => {});
-        callbacks.onTrainEnd = (logs: tf.Logs) => {
+        callbacks.onTrainEnd = (logs?: tf.Logs) => {
             if (this.__stopTrainingResolve) {
                 this.__stopTrainingResolve();
-                this.__stopTrainingResolve = null;
+                this.__stopTrainingResolve = undefined;
             }
             originalOnTrainEnd(logs);
         };
-        
+
         // Rest of trian function
         if (!this.isPrepared) {
             this.prepare();
@@ -294,17 +293,17 @@ export class TeachableMobileNet extends CustomMobileNet {
         const numLabels = this.getLabels().length;
         util.assert(
             numLabels === this.numClasses,
-            () => `Can not train, has ${numLabels} labels and ${this.numClasses} classes`);
+            () => `Can not train, has ${numLabels} labels and ${this.numClasses} classes`
+        );
 
         const inputShape = this.truncatedModel.outputs[0].shape.slice(1); // [ 7 x 7 x 1280]
-        const inputSize = tf.util.sizeFromShape(inputShape);
+        const inputSize = tf.util.sizeFromShape(inputShape as number[]);
 
         // in case we need to use a seed for predictable training
         let varianceScaling: Initializer;
         if (this.seed) {
-            varianceScaling = tf.initializers.varianceScaling({ seed: 3.14});
-        }
-        else {
+            varianceScaling = tf.initializers.varianceScaling({ seed: 3.14 });
+        } else {
             varianceScaling = tf.initializers.varianceScaling({});
         }
 
@@ -315,15 +314,15 @@ export class TeachableMobileNet extends CustomMobileNet {
                     units: params.denseUnits,
                     activation: 'relu',
                     kernelInitializer: varianceScaling, // 'varianceScaling'
-                    useBias: true
+                    useBias: true,
                 }),
                 tf.layers.dense({
                     kernelInitializer: varianceScaling, // 'varianceScaling'
                     useBias: false,
                     activation: 'softmax',
-                    units: this.numClasses
-                })
-            ]
+                    units: this.numClasses,
+                }),
+            ],
         });
 
         const optimizer = tf.train.adam(params.learningRate);
@@ -333,13 +332,11 @@ export class TeachableMobileNet extends CustomMobileNet {
             optimizer,
             // loss: 'binaryCrossentropy',
             loss: 'categoricalCrossentropy',
-            metrics: ['accuracy']
+            metrics: ['accuracy'],
         });
 
         if (!(params.batchSize > 0)) {
-            throw new Error(
-            `Batch size is 0 or NaN. Please choose a non-zero fraction`
-            );
+            throw new Error(`Batch size is 0 or NaN. Please choose a non-zero fraction`);
         }
 
         const trainData = this.trainDataset.batch(params.batchSize);
@@ -352,10 +349,10 @@ export class TeachableMobileNet extends CustomMobileNet {
         })
         */
 
-        const history = await this.trainingModel.fitDataset(trainData, {
+        await this.trainingModel.fitDataset(trainData, {
             epochs: params.epochs,
             validationData,
-            callbacks
+            callbacks,
         });
 
         const jointModel = tf.sequential();
@@ -402,13 +399,13 @@ export class TeachableMobileNet extends CustomMobileNet {
         return this._metadata.modelName;
     }
 
-    public stopTraining() {  
-        const promise = new Promise<void>((resolve, reject) => {
+    public stopTraining() {
+        const promise = new Promise<void>((resolve) => {
             this.trainingModel.stopTraining = true;
             this.__stopTrainingResolve = resolve;
             // this.__stopTrainingReject = reject;
         });
-        
+
         return promise;
     }
 
@@ -417,15 +414,15 @@ export class TeachableMobileNet extends CustomMobileNet {
         super.dispose();
     }
 
-    /* 
+    /*
      * Calculate each class accuracy using the validation dataset
      */
     public async calculateAccuracyPerClass() {
         const validationXs = this.validationDataset.mapAsync(async (dataset: TensorContainer) => {
-            return (dataset as { xs: TensorContainer, ys: TensorContainer}).xs;
+            return (dataset as { xs: TensorContainer; ys: TensorContainer }).xs;
         });
         const validationYs = this.validationDataset.mapAsync(async (dataset: TensorContainer) => {
-            return (dataset as { xs: TensorContainer, ys: TensorContainer}).ys;
+            return (dataset as { xs: TensorContainer; ys: TensorContainer }).ys;
         });
 
         // we need to split our validation data into batches in case it is too large to fit in memory

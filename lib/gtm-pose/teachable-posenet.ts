@@ -16,7 +16,7 @@
  */
 
 import * as tf from '@tensorflow/tfjs';
-import { PoseNet } from '@tensorflow-models/posenet';
+import { PoseNet } from '../posenet';
 import { util } from '@tensorflow/tfjs';
 import { TensorContainer } from '@tensorflow/tfjs-core/dist/tensor_types';
 import { CustomCallbackArgs } from '@tensorflow/tfjs';
@@ -63,16 +63,15 @@ function fisherYates(array: Float32Array[] | Sample[], seed?: seedrandom.prng) {
     // need to clone array or we'd be editing original as we goo
     const shuffled = array.slice();
 
-    for (let i = (length - 1); i > 0; i -= 1) {
-        let randomIndex ;
+    for (let i = length - 1; i > 0; i -= 1) {
+        let randomIndex;
         if (seed) {
             randomIndex = Math.floor(seed() * (i + 1));
-        }
-        else {
+        } else {
             randomIndex = Math.floor(Math.random() * (i + 1));
         }
 
-        [shuffled[i], shuffled[randomIndex]] = [shuffled[randomIndex],shuffled[i]];
+        [shuffled[i], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[i]];
     }
 
     return shuffled;
@@ -82,10 +81,10 @@ export class TeachablePoseNet extends CustomPoseNet {
     /**
      * Training and validation datasets
      */
-    private trainDataset: tf.data.Dataset<TensorContainer>;
-    private validationDataset: tf.data.Dataset<TensorContainer>;
+    private trainDataset!: tf.data.Dataset<TensorContainer>;
+    private validationDataset!: tf.data.Dataset<TensorContainer>;
 
-    private __stopTrainingResolve: () => void;
+    private __stopTrainingResolve?: () => void;
     // private __stopTrainingReject: (error: Error) => void;
 
     // Number of total samples
@@ -95,7 +94,7 @@ export class TeachablePoseNet extends CustomPoseNet {
     public examples: Float32Array[][] = [];
 
     // Optional seed to make shuffling of data predictable
-    private seed: seedrandom.prng;
+    private seed?: seedrandom.prng;
 
     /**
      * has the teachable model been trained?
@@ -170,7 +169,7 @@ export class TeachablePoseNet extends CustomPoseNet {
      * into proper tf.data.Dataset
      */
     public prepare() {
-        for (const classes in this.examples){
+        for (const classes in this.examples) {
             if (classes.length === 0) {
                 throw new Error('Add some examples before training');
             }
@@ -222,15 +221,15 @@ export class TeachablePoseNet extends CustomPoseNet {
         trainDataset = fisherYates(trainDataset, this.seed) as Sample[];
         validationDataset = fisherYates(validationDataset, this.seed) as Sample[];
 
-        const trainX = tf.data.array(trainDataset.map(sample => sample.data));
-        const validationX = tf.data.array(validationDataset.map(sample => sample.data));
-        const trainY = tf.data.array(trainDataset.map(sample => sample.label));
-        const validationY = tf.data.array(validationDataset.map(sample => sample.label));
+        const trainX = tf.data.array(trainDataset.map((sample) => sample.data));
+        const validationX = tf.data.array(validationDataset.map((sample) => sample.data));
+        const trainY = tf.data.array(trainDataset.map((sample) => sample.label));
+        const validationY = tf.data.array(validationDataset.map((sample) => sample.label));
 
         // return tf.data dataset objects
         return {
-            trainDataset: tf.data.zip({ xs: trainX,  ys: trainY}),
-            validationDataset: tf.data.zip({ xs: validationX,  ys: validationY})
+            trainDataset: tf.data.zip({ xs: trainX, ys: trainY }),
+            validationDataset: tf.data.zip({ xs: validationX, ys: validationY }),
         };
     }
 
@@ -258,10 +257,10 @@ export class TeachablePoseNet extends CustomPoseNet {
     public async train(params: TrainingParameters, callbacks: CustomCallbackArgs = {}) {
         // Add callback for onTrainEnd in case of early stop
         const originalOnTrainEnd = callbacks.onTrainEnd || (() => {});
-        callbacks.onTrainEnd = (logs: tf.Logs) => {
+        callbacks.onTrainEnd = (logs: tf.Logs | undefined) => {
             if (this.__stopTrainingResolve) {
                 this.__stopTrainingResolve();
-                this.__stopTrainingResolve = null;
+                this.__stopTrainingResolve = undefined;
             }
             originalOnTrainEnd(logs);
         };
@@ -274,7 +273,8 @@ export class TeachablePoseNet extends CustomPoseNet {
 
         util.assert(
             numLabels === this.numClasses,
-            () => `Can not train, has ${numLabels} labels and ${this.numClasses} classes`);
+            () => `Can not train, has ${numLabels} labels and ${this.numClasses} classes`
+        );
 
         // Inputs for posenet
         const inputSize = this.examples[0][1].length;
@@ -282,46 +282,43 @@ export class TeachablePoseNet extends CustomPoseNet {
         // in case we need to use a seed for predictable training
         let varianceScaling;
         if (this.seed) {
-            varianceScaling = tf.initializers.varianceScaling({ seed: 3.14}) as Initializer;
-        }
-        else {
+            varianceScaling = tf.initializers.varianceScaling({ seed: 3.14 }) as Initializer;
+        } else {
             varianceScaling = tf.initializers.varianceScaling({}) as Initializer;
         }
 
         this.model = tf.sequential({
             layers: [
-            // Layer 1.
-            tf.layers.dense({
-                inputShape: [inputSize],
-                units: params.denseUnits,
-                activation: 'relu',
-                kernelInitializer: varianceScaling, // 'varianceScaling'
-                useBias: true
-            }),
-            // Layer 2 dropout
-            tf.layers.dropout({rate: 0.5}),
-            // Layer 3. The number of units of the last layer should correspond
-            // to the number of classes we want to predict.
-            tf.layers.dense({
-                units: this.numClasses,
-                kernelInitializer: varianceScaling, // 'varianceScaling'
-                useBias: false,
-                activation: 'softmax'
-            })
-            ]
+                // Layer 1.
+                tf.layers.dense({
+                    inputShape: [inputSize],
+                    units: params.denseUnits,
+                    activation: 'relu',
+                    kernelInitializer: varianceScaling, // 'varianceScaling'
+                    useBias: true,
+                }),
+                // Layer 2 dropout
+                tf.layers.dropout({ rate: 0.5 }),
+                // Layer 3. The number of units of the last layer should correspond
+                // to the number of classes we want to predict.
+                tf.layers.dense({
+                    units: this.numClasses,
+                    kernelInitializer: varianceScaling, // 'varianceScaling'
+                    useBias: false,
+                    activation: 'softmax',
+                }),
+            ],
         });
         // const optimizer = tf.train.adam(params.learningRate);
         const optimizer = tf.train.rmsprop(params.learningRate);
         this.model.compile({
             optimizer,
             loss: 'categoricalCrossentropy',
-            metrics: ['accuracy']
+            metrics: ['accuracy'],
         });
 
         if (!(params.batchSize > 0)) {
-            throw new Error(
-            `Batch size is 0 or NaN. Please choose a non-zero fraction`
-            );
+            throw new Error(`Batch size is 0 or NaN. Please choose a non-zero fraction`);
         }
 
         const trainData = this.trainDataset.batch(params.batchSize);
@@ -339,7 +336,7 @@ export class TeachablePoseNet extends CustomPoseNet {
         await this.model.fitDataset(trainData, {
             epochs: params.epochs,
             validationData,
-            callbacks
+            callbacks,
         });
 
         optimizer.dispose(); // cleanup
@@ -356,13 +353,13 @@ export class TeachablePoseNet extends CustomPoseNet {
         }
     }
 
-    public stopTraining() {  
-        const promise = new Promise<void>((resolve, reject) => {
+    public stopTraining() {
+        const promise = new Promise<void>((resolve) => {
             this.model.stopTraining = true;
             this.__stopTrainingResolve = resolve;
             // this.__stopTrainingReject = reject;
         });
-        
+
         return promise;
     }
 
@@ -396,15 +393,15 @@ export class TeachablePoseNet extends CustomPoseNet {
         return this._metadata.modelName;
     }
 
-    /* 
+    /*
      * Calculate each class accuracy using the validation dataset
      */
     public async calculateAccuracyPerClass() {
         const validationXs = this.validationDataset.mapAsync(async (dataset: TensorContainer) => {
-            return (dataset as { xs: TensorContainer, ys: TensorContainer}).xs;
+            return (dataset as { xs: TensorContainer; ys: TensorContainer }).xs;
         });
         const validationYs = this.validationDataset.mapAsync(async (dataset: TensorContainer) => {
-            return (dataset as { xs: TensorContainer, ys: TensorContainer}).ys;
+            return (dataset as { xs: TensorContainer; ys: TensorContainer }).ys;
         });
 
         // we need to split our validation data into batches in case it is too large to fit in memory
@@ -421,7 +418,7 @@ export class TeachablePoseNet extends CustomPoseNet {
         for (let i = 0; i < iterations; i++) {
             // 1. get the prediction values in batches
             const batchedXTensor = await itX.next();
-            const batchedXPredictionTensor = (this.model.predict(batchedXTensor.value as tf.Tensor)) as tf.Tensor;
+            const batchedXPredictionTensor = this.model.predict(batchedXTensor.value as tf.Tensor) as tf.Tensor;
             const argMaxX = batchedXPredictionTensor.argMax(1); // Returns the indices of the max values along an axis
             allX.push(argMaxX);
 

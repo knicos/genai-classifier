@@ -19,7 +19,7 @@ type Drawable = HTMLImageElement | HTMLCanvasElement | HTMLVideoElement | ImageB
 
 const newCanvas = () => document.createElement('canvas');
 
-export function resize(image: Drawable, scale: number, canvas: HTMLCanvasElement= newCanvas()) {
+export function resize(image: Drawable, scale: number, canvas: HTMLCanvasElement = newCanvas()) {
     canvas.width = image.width * scale;
     canvas.height = image.height * scale;
     const ctx: CanvasRenderingContext2D = canvas.getContext('2d')!;
@@ -28,20 +28,33 @@ export function resize(image: Drawable, scale: number, canvas: HTMLCanvasElement
     return canvas;
 }
 
-export function resizeMaxTo(image: Drawable, maxSize: number, canvas: HTMLCanvasElement= newCanvas()) {
+export function resizeMaxTo(image: Drawable, maxSize: number, canvas: HTMLCanvasElement = newCanvas()) {
     const max = Math.max(image.width, image.height);
     return resize(image, maxSize / max, canvas);
 }
 
-export function resizeMinTo(image: Drawable, minSize: number, canvas: HTMLCanvasElement= newCanvas()) {
+export function resizeMinTo(image: Drawable, minSize: number, canvas: HTMLCanvasElement = newCanvas()) {
     const min = Math.min(image.width, image.height);
     return resize(image, minSize / min, canvas);
 }
 
+export function createCanvas(width = 200, height = 200, flipHorizontal = false) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
 
-export function cropTo( image: Drawable, size: number,
-    flipped = false, canvas: HTMLCanvasElement = newCanvas()) {
+    if (flipHorizontal) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+            ctx.translate(width, 0);
+            ctx.scale(-1, 1);
+        }
+    }
 
+    return canvas;
+}
+
+export function cropTo(image: Drawable, size: number, flipped = false, canvas: HTMLCanvasElement = newCanvas()) {
     // image image, bitmap, or canvas
     let width = image.width;
     let height = image.height;
@@ -59,13 +72,15 @@ export function cropTo( image: Drawable, size: number,
     const dx = scaledW - size;
     const dy = scaledH - size;
     canvas.width = canvas.height = size;
-    const ctx: CanvasRenderingContext2D = canvas.getContext('2d');
-    ctx.drawImage(image, ~~(dx / 2) * -1, ~~(dy / 2) * -1, scaledW, scaledH);
+    const ctx: CanvasRenderingContext2D | null = canvas.getContext('2d');
+    if (ctx) {
+        ctx.drawImage(image, ~~(dx / 2) * -1, ~~(dy / 2) * -1, scaledW, scaledH);
 
-    // canvas is already sized and cropped to center correctly
-    if (flipped) {
-        ctx.scale(-1, 1);
-        ctx.drawImage(canvas, size * -1, 0);
+        // canvas is already sized and cropped to center correctly
+        if (flipped) {
+            ctx.scale(-1, 1);
+            ctx.drawImage(canvas, size * -1, 0);
+        }
     }
 
     return canvas;

@@ -20,7 +20,7 @@ import { cropTo } from './canvas';
 
 const defaultVideoOptions: MediaTrackConstraints = {
     facingMode: 'user',
-    frameRate: 24
+    frameRate: 24,
 };
 
 const fillConstraints = (options: Partial<MediaTrackConstraints>) => {
@@ -30,12 +30,12 @@ const fillConstraints = (options: Partial<MediaTrackConstraints>) => {
     return options as MediaTrackConstraints;
 };
 
-export class Webcam  {
+export class Webcam {
     public flip: boolean;
     public width: number;
     public height: number;
-    public webcam: HTMLVideoElement;
-    public canvas: HTMLCanvasElement;
+    public webcam?: HTMLVideoElement;
+    public canvas?: HTMLCanvasElement;
 
     constructor(width = 400, height = 400, flip = false) {
         this.width = width;
@@ -48,25 +48,27 @@ export class Webcam  {
         if (!window.navigator.mediaDevices || !window.navigator.mediaDevices.getUserMedia) {
             return Promise.reject('Your browser does not support WebRTC. Please try another one.');
         }
-    
+
         options.width = 640;
         const videoOptions = fillConstraints(options);
 
         const video = document.createElement('video');
-        return window.navigator.mediaDevices.getUserMedia({ video: videoOptions })
-            .then((mediaStream) => {
+        return window.navigator.mediaDevices.getUserMedia({ video: videoOptions }).then(
+            (mediaStream) => {
                 video.srcObject = mediaStream;
 
-                video.addEventListener('loadedmetadata', (event: Event) => {
+                video.addEventListener('loadedmetadata', () => {
                     const { videoWidth: vw, videoHeight: vh } = video;
                     video.width = vw;
                     video.height = vh;
                 });
 
                 return video;
-            }, () => {
+            },
+            () => {
                 return Promise.reject('Could not open your camera. You may have denied access.');
-            });
+            }
+        );
     }
 
     // setup or setupWebcam
@@ -85,18 +87,20 @@ export class Webcam  {
 
     @autobind
     public play() {
-        const promise = this.webcam.play();
+        const promise = this.webcam?.play();
         return promise;
     }
 
     @autobind
     public pause() {
-        this.webcam.pause();
+        this.webcam?.pause();
     }
 
     @autobind
     public stop() {
-        this.stopStreamedVideo(this.webcam);
+        if (this.webcam) {
+            this.stopStreamedVideo(this.webcam);
+        }
     }
 
     @autobind
@@ -121,10 +125,10 @@ export class Webcam  {
         if (this.canvas && this.webcam) {
             const ctx = this.canvas.getContext('2d');
 
-           if (this.webcam.videoWidth !== 0) {
-               const croppedCanvas = cropTo(this.webcam, this.width, this.flip);
-               ctx.drawImage(croppedCanvas, 0, 0);
-           }
+            if (ctx && this.webcam.videoWidth !== 0) {
+                const croppedCanvas = cropTo(this.webcam, this.width, this.flip);
+                ctx.drawImage(croppedCanvas, 0, 0);
+            }
         }
     }
 }

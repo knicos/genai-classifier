@@ -1,4 +1,4 @@
-import { TeachableMobileNet } from '@knicos/tm-image';
+import { TeachableMobileNet } from './gtm-image';
 import * as tf from '@tensorflow/tfjs';
 
 export function cropTensor(img: tf.Tensor3D): tf.Tensor3D {
