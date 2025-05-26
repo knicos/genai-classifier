@@ -14,6 +14,10 @@
  * limitations under the License.
  * =============================================================================
  */
+
+// This file has been modified by Nicolas Pope to use updated versions of TensorFlow.js, fix type errors and
+// change the URL for the model being used.
+
 import * as tf from '@tensorflow/tfjs';
 import * as posenet from '../posenet';
 import { PosenetInput, Padding } from '../posenet/types';

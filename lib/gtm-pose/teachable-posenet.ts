@@ -15,6 +15,8 @@
  * =============================================================================
  */
 
+// This file has been modified by Nicolas Pope to use updated versions of TensorFlow.js and fix type errors.
+
 import * as tf from '@tensorflow/tfjs';
 import { PoseNet } from '../posenet';
 import { util } from '@tensorflow/tfjs';

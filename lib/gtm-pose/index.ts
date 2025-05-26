@@ -15,6 +15,8 @@
  * =============================================================================
  */
 
+// This file has been modified by Nicolas Pope to fix type errors.
+
 export { type Metadata, type ClassifierInputSource, CustomPoseNet, load, loadFromFiles } from './custom-posenet';
 
 export { TeachablePoseNet, createTeachable } from './teachable-posenet';
