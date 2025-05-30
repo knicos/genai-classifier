@@ -110,7 +110,7 @@ stages:
                       npm ci
                       npm run build
                       npm version --git-tag-version=false ${BUILD_SOURCEBRANCHNAME}
-                      npm publish
+                      npm publish --access public
           #- job: Github
           #  displayName: Github Mirror
           #  steps:
