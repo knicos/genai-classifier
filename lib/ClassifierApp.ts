@@ -36,6 +36,12 @@ export interface TrainingSettings {
     batchSize: number;
 }
 
+export interface PredictionsOutput extends ExplainedPredictionsOutput {
+    nameOfMax: string;
+    indexOfMax: number;
+    failed?: boolean;
+}
+
 type ClassifierAppEvents = 'loading' | 'ready' | 'epoch' | 'training' | 'trainingcomplete' | 'error' | 'action';
 
 export default class ClassifierApp extends EE<ClassifierAppEvents> {
@@ -73,12 +79,18 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
         }
     }
 
-    public async predict(image: HTMLCanvasElement): Promise<ExplainedPredictionsOutput> {
+    public async predict(image: HTMLCanvasElement): Promise<PredictionsOutput> {
         if (this.model) {
             const predictions = await this.model.predict(image);
-            return predictions;
+
+            const nameOfMax = predictions.predictions.reduce((prev, val) =>
+                val.probability > prev.probability ? val : prev
+            );
+            const indexOfMax = predictions.predictions.indexOf(nameOfMax);
+
+            return { ...predictions, nameOfMax: nameOfMax.className, indexOfMax, failed: false };
         }
-        return { predictions: [] };
+        return { predictions: [], nameOfMax: '', indexOfMax: -1, failed: true };
     }
 
     public getLabels(): string[] {
@@ -213,7 +225,9 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
             samples: [],
         };
 
-        const zip = await JSZip.loadAsync(file);
+        const blob = typeof file === 'string' ? await fetch(file).then((r) => r.blob()) : file;
+
+        const zip = await JSZip.loadAsync(blob);
         const promises: Promise<void>[] = [];
 
         zip.forEach((_: string, data: JSZip.JSZipObject) => {

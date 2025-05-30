@@ -15,7 +15,7 @@
  * =============================================================================
  */
 
-import autobind from 'autobind-decorator';
+//import autobind from 'autobind-decorator';
 import { cropTo } from './canvas';
 
 const defaultVideoOptions: MediaTrackConstraints = {
@@ -43,7 +43,7 @@ export class Webcam {
         this.flip = flip;
     }
 
-    @autobind
+    //@autobind
     public getWebcam(options: MediaTrackConstraints = {}) {
         if (!window.navigator.mediaDevices || !window.navigator.mediaDevices.getUserMedia) {
             return Promise.reject('Your browser does not support WebRTC. Please try another one.');
@@ -72,7 +72,7 @@ export class Webcam {
     }
 
     // setup or setupWebcam
-    @autobind
+    //@autobind
     public async setup(options: MediaTrackConstraints = {}) {
         if (!this.webcam) {
             this.webcam = await this.getWebcam(options);
@@ -85,30 +85,30 @@ export class Webcam {
         }
     }
 
-    @autobind
+    //@autobind
     public play() {
         const promise = this.webcam?.play();
         return promise;
     }
 
-    @autobind
+    //@autobind
     public pause() {
         this.webcam?.pause();
     }
 
-    @autobind
+    //@autobind
     public stop() {
         if (this.webcam) {
             this.stopStreamedVideo(this.webcam);
         }
     }
 
-    @autobind
+    //@autobind
     public update() {
         this.renderCameraToCanvas();
     }
 
-    @autobind
+    //@autobind
     public stopStreamedVideo(videoEl: HTMLVideoElement) {
         const stream = videoEl.srcObject as MediaStream;
         const tracks = stream.getTracks();
@@ -120,7 +120,7 @@ export class Webcam {
         videoEl.srcObject = null;
     }
 
-    @autobind
+    //@autobind
     public renderCameraToCanvas() {
         if (this.canvas && this.webcam) {
             const ctx = this.canvas.getContext('2d');

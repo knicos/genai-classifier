@@ -1,0 +1,44 @@
+<html>
+    <head>
+        <title>TM Classifier</title>
+        <script
+            type="module"
+            src="/dist/main.js"
+        ></script>
+        <style>
+            body {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+            #webcam {
+                margin-bottom: 20px;
+            }
+            #prediction {
+                font-size: 24px;
+                font-weight: bold;
+            }
+        </style>
+    </head>
+    <body>
+        <script type="module">
+            import TMClassifier, { Webcam } from '/dist/main.js';
+
+            TMClassifier.load('https://store.gen-ai.fi/classifiers/flower-mushroom.zip').then((classifier) => {
+                const webcam = new Webcam();
+                webcam.setup().then(() => {
+                    document.getElementById('webcam').appendChild(webcam.webcam);
+                    webcam.play();
+
+                    setInterval(async () => {
+                        webcam.update();
+                        const predictions = await classifier.predict(webcam.canvas);
+                        document.getElementById('prediction').innerHTML = predictions.nameOfMax;
+                    }, 500);
+                });
+            });
+        </script>
+        <div id="webcam"></div>
+        <div id="prediction"></div>
+    </body>
+</html>

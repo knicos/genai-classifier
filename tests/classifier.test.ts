@@ -1,5 +1,5 @@
 import { describe, it } from 'vitest';
-import TeachableModel from '../lib/main';
+import { TeachableModel } from '../lib/main';
 
 describe('Can create a new classifier', () => {
     it('can create a new image classifier', { timeout: 10000 }, async ({ expect }) => {
