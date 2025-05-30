@@ -106,7 +106,7 @@ stages:
                       path: $(System.DefaultWorkingDirectory)/node_modules
                   displayName: Cache NPM packages
                 - script: |
-                      echo -e "\n//npm.pkg.github.com/:_authToken=$(GITHUB_TOKEN)" >> ./.npmrc
+                      echo -e "\n//registry.npmjs.org/:_authToken=$(NPM_TOKEN)" >> ./.npmrc
                       npm ci
                       npm run build
                       npm version --git-tag-version=false ${BUILD_SOURCEBRANCHNAME}
