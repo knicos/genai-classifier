@@ -1,0 +1,53 @@
+<html>
+    <head>
+        <title>TM Classifier</title>
+        <script
+            type="module"
+            src="/dist/main.js"
+        ></script>
+        <style>
+            body {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+            #webcam {
+                margin-bottom: 20px;
+            }
+            #prediction {
+                font-size: 24px;
+                font-weight: bold;
+            }
+        </style>
+    </head>
+    <body>
+        <script type="module">
+            import TMClassifier, { Webcam } from '/dist/main.js';
+
+            TMClassifier.load('https://store.gen-ai.fi/classifiers/testimalli1.zip').then((classifier) => {
+                classifier.setXAICanvas(document.getElementById('heatmap'));
+                classifier.setXAIClass('Kuitti');
+
+                const webcam = new Webcam(224, 224);
+                webcam.setup().then(() => {
+                    document.getElementById('webcam').appendChild(webcam.webcam);
+                    webcam.play();
+
+                    setInterval(async () => {
+                        webcam.update();
+                        const p = await classifier.predict(webcam.canvas);
+                        console.log(p);
+                        document.getElementById('prediction').innerHTML = p.nameOfMax;
+                    }, 500);
+                });
+            });
+        </script>
+        <div id="webcam"></div>
+        <canvas
+            id="heatmap"
+            width="224"
+            height="224"
+        ></canvas>
+        <div id="prediction"></div>
+    </body>
+</html>

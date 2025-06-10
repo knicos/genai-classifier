@@ -79,6 +79,18 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
         }
     }
 
+    public setXAICanvas(image: HTMLCanvasElement) {
+        if (this.model) {
+            this.model.setXAICanvas(image);
+        }
+    }
+
+    public setXAIClass(className: string | number | null) {
+        if (this.model) {
+            this.model.setXAIClass(className);
+        }
+    }
+
     public async predict(image: HTMLCanvasElement): Promise<PredictionsOutput> {
         if (this.model) {
             const predictions = await this.model.predict(image);

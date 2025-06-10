@@ -84,6 +84,7 @@ function fisherYates(array: Float32Array[] | Sample[], seed?: seedrandom.prng) {
 }
 
 export class TeachableMobileNet extends CustomMobileNet {
+    public truncatedModel: tf.LayersModel;
     /**
      * the training model for transfer learning
      */

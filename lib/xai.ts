@@ -31,6 +31,7 @@ export class CAM {
     private mobileNet: TeachableMobileNet;
     private activationModel: tf.Sequential;
     private exposedMobileNet: tf.LayersModel;
+    private selectedIndex: number | null = null;
 
     constructor(mobileNet: TeachableMobileNet) {
         this.mobileNet = mobileNet;
@@ -58,13 +59,19 @@ export class CAM {
             ],
         });
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const model = (this.mobileNet.model.layers[0] as any).model as tf.Sequential;
-        const conv1bn = model.getLayer('out_relu');
+        //console.log(tModel);
+
+        //const model = this.mobileNet.truncatedModel.layers[0] as tf.Sequential;
+        const model = (this.mobileNet.model.layers[0] as tf.Sequential).layers[0] as tf.Sequential; //(this.mobileNet.model.layers[0] as any).model as tf.Sequential;
+        //const conv1bn = model.getLayer('out_relu');
 
         this.exposedMobileNet = tf.model({
             inputs: this.mobileNet.model.input,
-            outputs: [conv1bn.output as tf.SymbolicTensor, model.output as tf.SymbolicTensor],
+            outputs: [
+                model.output as tf.SymbolicTensor,
+                ((this.mobileNet.model.layers[0] as tf.Sequential).layers[1] as tf.Sequential)
+                    .output as tf.SymbolicTensor,
+            ],
         });
     }
 
@@ -108,6 +115,10 @@ export class CAM {
         });
     }
 
+    public setSelectedIndex(index: number | null) {
+        this.selectedIndex = index;
+    }
+
     public async createCAM(image: HTMLCanvasElement) {
         const imageTensor = capture(image);
         const layerOutputs = this.exposedMobileNet.predict(imageTensor);
@@ -119,7 +130,15 @@ export class CAM {
         // Get best index
         const nameOfMax = predictions.reduce((prev, val) => (val.probability > prev.probability ? val : prev));
         const ix = predictions.indexOf(nameOfMax);
-        const cam = this.calculateActivations(layerOutputs[0], ix);
+        const cam = this.calculateActivations(layerOutputs[0], this.selectedIndex !== null ? this.selectedIndex : ix);
+        const maxProbability = predictions[ix].probability;
+        const normPredictions =
+            this.selectedIndex === null
+                ? predictions
+                : predictions.map((p) => ({
+                      className: p.className,
+                      probability: p.probability / maxProbability,
+                  }));
 
         layerOutputs.forEach((output) => {
             output.dispose();
@@ -127,8 +146,10 @@ export class CAM {
 
         const resized = tf.tidy(() => {
             const finalSum = cam.resizeBilinear([image.width, image.height], false, true);
-            const finalMax = finalSum.max();
-            const final = finalSum.div(finalMax);
+            //const finalMax = finalSum.max();
+            const final = finalSum.mul(
+                normPredictions[this.selectedIndex !== null ? this.selectedIndex : ix].probability
+            );
 
             return final.reshape([image.width, image.height]);
         });

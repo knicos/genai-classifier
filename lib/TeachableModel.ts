@@ -84,6 +84,28 @@ export default class TeachableModel {
         });
     }
 
+    public setXAICanvas(canvas: HTMLCanvasElement) {
+        if (this.imageModel) {
+            this.explained = canvas;
+            if (!this.CAMModel) {
+                this.CAMModel = new CAM(this.imageModel);
+            }
+            return;
+        }
+        throw new Error('no_image_model');
+    }
+
+    public setXAIClass(className: string | number | null) {
+        if (this.CAMModel) {
+            if (className === null) {
+                this.CAMModel.setSelectedIndex(null);
+                return;
+            }
+            const ix = typeof className === 'number' ? className : this.imageModel?.getLabels().indexOf(className);
+            this.CAMModel.setSelectedIndex(ix === undefined ? null : ix);
+        }
+    }
+
     public setName(name: string) {
         if (this.imageModel) {
             this.imageModel.setName(name);
