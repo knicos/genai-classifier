@@ -169,7 +169,7 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
         return new ClassifierApp(variant);
     }
 
-    public async save(): Promise<Blob> {
+    public async saveComponents(): Promise<ModelContents> {
         const zip = new JSZip();
         if (this.samples.length > 0) {
             const folder = zip.folder('samples');
@@ -229,7 +229,11 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
         }
 
         contents.zip = zipData;
-        return contents.zip;
+        return contents;
+    }
+
+    public async save(): Promise<Blob> {
+        return (await this.saveComponents()).zip || new Blob();
     }
 
     static async load(file: string | Blob): Promise<ClassifierApp> {

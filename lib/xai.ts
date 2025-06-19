@@ -1,5 +1,6 @@
 import { TeachableMobileNet } from './gtm-image';
 import * as tf from '@tensorflow/tfjs';
+import { cropTo } from './gtm-utils/canvas';
 
 export function cropTensor(img: tf.Tensor3D): tf.Tensor3D {
     const size = Math.min(img.shape[0], img.shape[1]);
@@ -120,7 +121,8 @@ export class CAM {
     }
 
     public async createCAM(image: HTMLCanvasElement) {
-        const imageTensor = capture(image);
+        const croppedImage = cropTo(image, this.mobileNet.getMetadata().imageSize || 0, false);
+        const imageTensor = capture(croppedImage);
         const layerOutputs = this.exposedMobileNet.predict(imageTensor);
         imageTensor.dispose();
         if (!Array.isArray(layerOutputs)) throw new Error('not_array');
