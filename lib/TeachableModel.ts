@@ -42,7 +42,11 @@ export interface ExplainedPredictionsOutput {
 
 interface TrainingParameters extends ImageTrainingParams, PoseTrainingParams {}
 
-export type Metadata = ImageMetadata | PoseMetadata;
+interface BaseMetadata {
+    modelBaseUrl?: string;
+}
+
+export type Metadata = BaseMetadata & (ImageMetadata | PoseMetadata);
 
 const NULLARRAY: string[] = [];
 
@@ -58,6 +62,7 @@ export default class TeachableModel {
     public variant: TMType = 'image';
     public explained?: HTMLCanvasElement;
     private CAMModel?: CAM;
+    private modelBaseUrl = 'https://tmstore.blob.core.windows.net/models';
 
     constructor(type: TMType, metadata?: Metadata, model?: tf.io.ModelJSON, weights?: ArrayBuffer) {
         this._ready = new Promise((resolve) => {
@@ -71,6 +76,10 @@ export default class TeachableModel {
             }
 
             this.variant = atype;
+
+            if (metadata?.modelBaseUrl) {
+                this.modelBaseUrl = metadata.modelBaseUrl;
+            }
 
             if (atype === 'image') {
                 this.loadImage(metadata, model, weights).then(() => {
@@ -140,7 +149,7 @@ export default class TeachableModel {
             const tmmodel = await createImage(metadata, {
                 version: 2,
                 alpha: 0.35,
-                modelBaseUrl: 'https://tmstore.blob.core.windows.net/models',
+                modelBaseUrl: this.modelBaseUrl,
             });
             tmmodel.model = await tf.loadLayersModel({
                 load: async () => {
