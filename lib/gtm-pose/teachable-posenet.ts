@@ -23,7 +23,7 @@ import { util } from '@tensorflow/tfjs';
 import { TensorContainer } from '@tensorflow/tfjs-core/dist/tensor_types';
 import { CustomCallbackArgs } from '@tensorflow/tfjs';
 import { CustomPoseNet, Metadata, loadPoseNet } from './custom-posenet';
-import * as seedrandom from 'seedrandom';
+import seedrandom from 'seedrandom';
 import { Initializer } from '@tensorflow/tfjs-layers/dist/initializers';
 
 const VALIDATION_FRACTION = 0.15;

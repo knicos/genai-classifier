@@ -3,3 +3,7 @@ dist
 .env
 coverage
 tsconfig.build.tsbuildinfo
+
+# ImageNet dataset samples
+lib/gtm-image/imagenet_samples/
+lib/gtm-image/Download imagenet.ipynb

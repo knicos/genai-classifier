@@ -9,7 +9,7 @@ import {
     createTeachable as createPose,
 } from './gtm-pose';
 import * as tf from '@tensorflow/tfjs';
-import { renderHeatmap } from './heatmap';
+import { renderHeatmap, renderPoseXAI } from './heatmap';
 import { CAM } from './xai';
 
 export type TMType = 'image' | 'pose';
@@ -56,7 +56,6 @@ export default class TeachableModel {
     private _ready?: Promise<boolean>;
     private trained = false;
     private lastPose?: Pose;
-    private lastPoseOut?: Float32Array;
     private busy = false;
     private imageSize = 224;
     public variant: TMType = 'image';
@@ -100,8 +99,14 @@ export default class TeachableModel {
                 this.CAMModel = new CAM(this.imageModel);
             }
             return;
+        } else if (this.poseModel) {
+            this.explained = canvas;
+            if (!this.CAMModel) {
+                this.CAMModel = new CAM(this.poseModel);
+            }
+            return;
         }
-        throw new Error('no_image_model');
+        throw new Error('no_model');
     }
 
     public setXAIClass(className: string | number | null) {
@@ -110,8 +115,10 @@ export default class TeachableModel {
                 this.CAMModel.setSelectedIndex(null);
                 return;
             }
-            const ix = typeof className === 'number' ? className : this.imageModel?.getLabels().indexOf(className);
-            this.CAMModel.setSelectedIndex(ix === undefined ? null : ix);
+            const ix = typeof className === 'number' 
+                ? className 
+                : (this.imageModel?.getLabels() || this.poseModel?.getLabels() || []).indexOf(className);
+            this.CAMModel.setSelectedIndex(ix === undefined || ix === -1 ? null : ix);
         }
     }
 
@@ -192,7 +199,7 @@ export default class TeachableModel {
             tmmodel.setName('My Model');
         }
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         this.imageSize = (this.poseModel.getMetadata().modelSettings as any)?.posenet?.inputResolution || 257;
     }
 
@@ -249,18 +256,16 @@ export default class TeachableModel {
 
     /**
      * Estimate pose if this is a PoseNet model, otherwise do nothing.
-     * This must be called for prediction to work with PoseNet.
+     * This caches the pose so draw() can use it without re-estimating.
      *
      * @param image Input image at correct resolution
      */
     public async estimate(image: HTMLCanvasElement): Promise<void> {
         if (this.poseModel && !this.busy) {
-            // Only allow one estimate at a time.
             this.busy = true;
             try {
-                const { pose, posenetOutput } = await this.poseModel.estimatePose(image);
-                this.lastPose = pose;
-                this.lastPoseOut = posenetOutput;
+                const poseData = await this.poseModel.estimatePose(image);
+                this.lastPose = poseData.pose;
             } catch (e) {
                 console.error('Estimation error', e);
             }
@@ -283,16 +288,90 @@ export default class TeachableModel {
                 return { predictions };
             }
         } else if (this.poseModel) {
-            // Force an estimate if we are not generating one already
-            if (!this.busy) {
-                // Note: doesn't wait for estimate promise.
-                this.estimate(image);
+            // For validation: always get fresh pose estimation, don't rely on cached lastPoseOut
+            // This ensures accurate predictions even when called rapidly or out of sequence
+            const { pose, posenetOutput } = await this.poseModel.estimatePose(image);
+            
+            if (!posenetOutput || posenetOutput.length === 0) {
+                console.warn('Failed to extract pose from image');
+                return { predictions: [] };
             }
-            if (!this.lastPoseOut) return { predictions: [] };
-            const result = { predictions: await this.poseModel.predict(this.lastPoseOut) };
-            return result;
+            
+            // Always draw pose skeleton on canvas for pose models
+            if (pose) {
+                const ctx = image.getContext('2d');
+                if (ctx) {
+                    drawKeypoints(pose.keypoints, 0.5, ctx);
+                    drawSkeleton(pose.keypoints, 0.5, ctx);
+                }
+            }
+            
+            // If XAI is enabled, generate explanations
+            if (this.explained && this.CAMModel && pose) {
+                try {
+                    const camResult = await this.CAMModel.createPoseCAM(image, posenetOutput);
+                    // Use keypoint-importance visualization if available, otherwise fall back to heatmap
+                    if (camResult.keypointImportance) {
+                        renderPoseXAI(image, this.explained, pose.keypoints, camResult.keypointImportance, 0.3);
+                    } else {
+                        renderHeatmap(image, this.explained, camResult.heatmapData);
+                    }
+                    return { predictions: camResult.predictions };
+                } catch (error) {
+                    console.warn('XAI generation failed, falling back to standard prediction:', error);
+                    const predictions = await this.poseModel.predict(posenetOutput);
+                    return { predictions };
+                }
+            } else {
+                const predictions = await this.poseModel.predict(posenetOutput);
+                return { predictions };
+            }
         }
         return { predictions: [] };
+    }
+
+    /**
+     * Predict directly from pose output data (for validation/internal use)
+     */
+    public async predictFromPoseData(poseData: Float32Array): Promise<ExplainedPredictionsOutput> {
+        console.log('predictFromPoseData called with data length:', poseData?.length);
+        
+        if (!this.poseModel) {
+            console.warn('VALIDATION ERROR: Pose model not initialized');
+            return { predictions: [] };
+        }
+        
+        console.log('Pose model exists, checking model.model...');
+        
+        if (!this.poseModel.model) {
+            console.warn('VALIDATION ERROR: Pose model.model is null');
+            return { predictions: [] };
+        }
+        
+        console.log('Model exists with layers:', this.poseModel.model.layers.length);
+        
+        if (this.poseModel.model.layers.length === 0) {
+            console.warn('VALIDATION ERROR: Pose model has no layers');
+            return { predictions: [] };
+        }
+        
+        try {
+            console.log('About to call poseModel.predict...');
+            console.log('Model labels:', this.poseModel.getMetadata().labels);
+            
+            const predictions = await this.poseModel.predict(poseData);
+            
+            console.log('Predictions returned:', predictions);
+            console.log('Predictions length:', predictions?.length);
+            
+            if (!predictions || predictions.length === 0) {
+                console.warn('VALIDATION ERROR: Pose model returned empty predictions');
+            }
+            return { predictions };
+        } catch (error) {
+            console.error('VALIDATION ERROR during pose prediction:', error);
+            return { predictions: [] };
+        }
     }
 
     public async train(params: TrainingParameters, callbacks: tf.CustomCallbackArgs) {
@@ -308,6 +387,10 @@ export default class TeachableModel {
             });
         } else if (this.poseModel) {
             return this.poseModel.train(params, callbacks).then((m) => {
+                if (this.poseModel) {
+                    if (this.CAMModel) this.CAMModel.dispose();
+                    this.CAMModel = new CAM(this.poseModel);
+                }
                 this.trained = true;
                 return m;
             });
@@ -352,8 +435,7 @@ export default class TeachableModel {
         }
         this.imageModel = undefined;
         this.poseModel = undefined;
-        this.lastPose = undefined;
-        this.lastPoseOut = undefined;
+        // Pose state is no longer cached
     }
 
     public getLabels(): string[] {

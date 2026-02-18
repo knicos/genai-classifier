@@ -73,7 +73,7 @@ const fillMetadata = (data: Partial<Metadata>) => {
 };
 
 // tslint:disable-next-line:no-any
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const isMetadata = (c: any): c is Metadata => !!c && Array.isArray(c.labels);
 
 const isAlphaValid = (version: number, alpha: number) => {
