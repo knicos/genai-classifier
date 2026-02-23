@@ -327,14 +327,6 @@ export class TeachablePoseNet extends CustomPoseNet {
         const validationData = this.validationDataset.batch(params.batchSize);
 
         // For debugging: check for shuffle or result from trainDataset
-        /*
-        await trainDataset.forEach((e: tf.Tensor[]) => {
-            console.log(e);
-            // @ts-ignore
-            let data = e.ys.dataSync() as Float32Array;
-            console.log(data);
-        });
-        */
         await this.model.fitDataset(trainData, {
             epochs: params.epochs,
             validationData,

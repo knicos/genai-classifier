@@ -77,16 +77,14 @@ const fillMetadata = (data: Partial<Metadata>) => {
 const isMetadata = (c: any): c is Metadata => !!c && Array.isArray(c.labels);
 
 const isAlphaValid = (version: number, alpha: number) => {
-    if (version === 1) {
+        if (version === 1) {
         if (alpha !== 0.25 && alpha !== 0.5 && alpha !== 0.75 && alpha !== 1) {
             console.warn('Invalid alpha. Options are: 0.25, 0.50, 0.75 or 1.00.');
-            console.log('Loading model with alpha: ', DEFAULT_ALPHA_V1.toFixed(2));
             return DEFAULT_ALPHA_V1;
         }
     } else {
-        if (alpha !== 0.35 && alpha !== 0.5 && alpha !== 0.75 && alpha !== 1) {
+            if (alpha !== 0.35 && alpha !== 0.5 && alpha !== 0.75 && alpha !== 1) {
             console.warn('Invalid alpha. Options are: 0.35, 0.50, 0.75 or 1.00.');
-            console.log('Loading model with alpha: ', DEFAULT_ALPHA_V2.toFixed(2));
             return DEFAULT_ALPHA_V2;
         }
     }
@@ -109,7 +107,7 @@ const parseModelOptions = (options?: ModelOptions) => {
             options.alpha = options.alpha || DEFAULT_ALPHA_V1;
             options.alpha = isAlphaValid(options.version, options.alpha);
 
-            console.log(`Loading mobilenet ${options.version} and alpha ${options.alpha}`);
+            // Loading mobilenet v1 with alpha
 
             return [
                 // tslint:disable-next-line:max-line-length
@@ -122,7 +120,7 @@ const parseModelOptions = (options?: ModelOptions) => {
             options.alpha = options.alpha || DEFAULT_ALPHA_V2;
             options.alpha = isAlphaValid(options.version, options.alpha);
 
-            console.log(`Loading mobilenet ${options.version} and alpha ${options.alpha}`);
+            // Loading mobilenet v2 with alpha
             return [
                 // tslint:disable-next-line:max-line-length
                 `${options.modelBaseUrl || MODEL_BASE_URL}/mobilenet_v2_${options.alpha

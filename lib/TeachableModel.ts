@@ -334,36 +334,22 @@ export default class TeachableModel {
      * Predict directly from pose output data (for validation/internal use)
      */
     public async predictFromPoseData(poseData: Float32Array): Promise<ExplainedPredictionsOutput> {
-        console.log('predictFromPoseData called with data length:', poseData?.length);
-        
         if (!this.poseModel) {
             console.warn('VALIDATION ERROR: Pose model not initialized');
             return { predictions: [] };
         }
-        
-        console.log('Pose model exists, checking model.model...');
-        
         if (!this.poseModel.model) {
             console.warn('VALIDATION ERROR: Pose model.model is null');
             return { predictions: [] };
         }
-        
-        console.log('Model exists with layers:', this.poseModel.model.layers.length);
-        
         if (this.poseModel.model.layers.length === 0) {
             console.warn('VALIDATION ERROR: Pose model has no layers');
             return { predictions: [] };
         }
-        
+
         try {
-            console.log('About to call poseModel.predict...');
-            console.log('Model labels:', this.poseModel.getMetadata().labels);
-            
             const predictions = await this.poseModel.predict(poseData);
-            
-            console.log('Predictions returned:', predictions);
-            console.log('Predictions length:', predictions?.length);
-            
+
             if (!predictions || predictions.length === 0) {
                 console.warn('VALIDATION ERROR: Pose model returned empty predictions');
             }
@@ -416,25 +402,41 @@ export default class TeachableModel {
     }
 
     public dispose() {
+        // Dispose CAM first before disposing models, since CAM reference model layers
+        if (this.CAMModel) {
+            try {
+                this.CAMModel.dispose();
+            } catch (error) {
+                console.warn('Error disposing CAM model:', error);
+            }
+        }
+        
+        // Then dispose the actual models
         if (this.imageModel) {
-            if (this.imageModel.isTrained) {
-                this.imageModel.dispose();
-            } else {
-                this.imageModel.model?.dispose();
+            try {
+                if (this.imageModel.isTrained) {
+                    this.imageModel.dispose();
+                } else {
+                    this.imageModel.model?.dispose();
+                }
+            } catch (error) {
+                console.warn('Error disposing image model:', error);
             }
         }
         if (this.poseModel) {
-            if (this.poseModel.isTrained) {
-                this.poseModel.dispose();
-            } else {
-                this.poseModel.model?.dispose();
+            try {
+                if (this.poseModel.isTrained) {
+                    this.poseModel.dispose();
+                } else {
+                    this.poseModel.model?.dispose();
+                }
+            } catch (error) {
+                console.warn('Error disposing pose model:', error);
             }
-        }
-        if (this.CAMModel) {
-            this.CAMModel.dispose();
         }
         this.imageModel = undefined;
         this.poseModel = undefined;
+        this.CAMModel = undefined;
         // Pose state is no longer cached
     }
 

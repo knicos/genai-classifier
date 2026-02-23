@@ -53,6 +53,10 @@ export class CAM {
          
         const tModel = (mobileNet.model.layers[1] as any).model as tf.Sequential;
 
+        // Clone the dense layer weights so the activationModel owns its tensors
+        const imgDense1Weights = (tModel.layers[1].getWeights() || []).map((w) => w.clone());
+        const imgDense2Weights = (tModel.layers[2].getWeights() || []).map((w) => w.clone());
+
         this.activationModel = tf.sequential({
             layers: [
                 tf.layers.dense({
@@ -61,19 +65,17 @@ export class CAM {
                     activation: 'relu',
                     kernelInitializer: 'varianceScaling',
                     useBias: true,
-                    weights: tModel.layers[1].getWeights(),
+                    weights: imgDense1Weights,
                 }),
                 tf.layers.dense({
                     kernelInitializer: 'varianceScaling',
                     useBias: false,
                     activation: 'relu', // 'softmax',
                     units: tModel.outputs[0].shape[1] || 1,
-                    weights: tModel.layers[2].getWeights(),
+                    weights: imgDense2Weights,
                 }),
             ],
         });
-
-        //console.log(tModel);
 
         //const model = this.mobileNet.truncatedModel.layers[0] as tf.Sequential;
         const model = (mobileNet.model.layers[0] as tf.Sequential).layers[0] as tf.Sequential;
@@ -97,20 +99,24 @@ export class CAM {
         const denseLayer1 = tModel.layers[0] as tf.layers.Layer;
         const denseLayer2 = tModel.layers[2] as tf.layers.Layer; // Skip dropout layer
 
+        // Clone the dense layer weights so the activationModel owns its tensors
+        const poseDense1Weights = (denseLayer1.getWeights() || []).map((w) => w.clone());
+        const poseDense2Weights = (denseLayer2.getWeights() || []).map((w) => w.clone());
+
         this.activationModel = tf.sequential({
             layers: [
                 tf.layers.dense({
-                    inputShape: denseLayer1.getWeights()[0].shape[0] as any,
-                    units: denseLayer1.getWeights()[0].shape[1] as number,
+                    inputShape: poseDense1Weights[0].shape[0] as any,
+                    units: poseDense1Weights[0].shape[1] as number,
                     activation: 'relu',
                     useBias: true,
-                    weights: denseLayer1.getWeights(),
+                    weights: poseDense1Weights,
                 }),
                 tf.layers.dense({
-                    units: denseLayer2.getWeights()[0].shape[1] as number,
+                    units: poseDense2Weights[0].shape[1] as number,
                     activation: 'relu',
                     useBias: false, // Second layer has no bias in the trained model
-                    weights: denseLayer2.getWeights(),
+                    weights: poseDense2Weights,
                 }),
             ],
         });
@@ -122,10 +128,18 @@ export class CAM {
     }
 
     public dispose() {
-        this.activationModel.dispose();
-        if (this.exposedMobileNet) {
-            this.exposedMobileNet.dispose();
+        try {
+            if (this.activationModel) {
+                this.activationModel.dispose();
+            }
+        } catch (error) {
+            console.warn('Error disposing activation model:', error);
         }
+        
+        // DO NOT dispose exposedMobileNet here - it contains references to layers
+        // owned by the main model. Disposing it causes double-disposal of shared layers.
+        // The main model's dispose() will handle cleanup of those layers.
+        this.exposedMobileNet = undefined;
     }
 
     public setSelectedIndex(index: number | null) {

@@ -344,11 +344,6 @@ export class TeachableMobileNet extends CustomMobileNet {
         const validationData = this.validationDataset.batch(params.batchSize);
 
         // For debugging: check for shuffle or result from trainDataset
-        /*
-        await trainDataset.forEach((e: tf.Tensor[]) => {
-            console.log(e);
-        })
-        */
 
         await this.trainingModel.fitDataset(trainData, {
             epochs: params.epochs,
@@ -411,8 +406,15 @@ export class TeachableMobileNet extends CustomMobileNet {
     }
 
     public dispose() {
-        this.trainingModel.dispose();
-        super.dispose();
+        // Only dispose this.model (the jointModel) which safely disposes all its layers
+        // Do NOT separately dispose trainingModel or truncatedModel as they are part of jointModel
+        if (this.model && this.model.layers.length > 0) {
+            try {
+                this.model.dispose();
+            } catch (error) {
+                console.warn('Error disposing model:', error);
+            }
+        }
     }
 
     /*
