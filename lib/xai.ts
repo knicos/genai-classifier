@@ -35,6 +35,7 @@ export class CAM {
     private activationModel!: tf.Sequential;
     private exposedMobileNet?: tf.LayersModel;
     private selectedIndex: number | null = null;
+    private _disposed = false;
 
     constructor(model: TeachableMobileNet | TeachablePoseNet) {
         this.model = model;
@@ -128,18 +129,16 @@ export class CAM {
     }
 
     public dispose() {
-        try {
-            if (this.activationModel) {
-                this.activationModel.dispose();
-            }
-        } catch (error) {
-            console.warn('Error disposing activation model:', error);
-        }
-        
-        // DO NOT dispose exposedMobileNet here - it contains references to layers
-        // owned by the main model. Disposing it causes double-disposal of shared layers.
-        // The main model's dispose() will handle cleanup of those layers.
+        this._disposed = true;
+        // activationModel owns cloned weights — safe to dispose independently
+        this.activationModel?.dispose();
+        // DO NOT dispose exposedMobileNet: it shares layers with the main model.
+        // The main model's dispose() handles those layers.
         this.exposedMobileNet = undefined;
+    }
+
+    public isDisposed(): boolean {
+        return this._disposed;
     }
 
     public setSelectedIndex(index: number | null) {
@@ -147,44 +146,41 @@ export class CAM {
     }
 
     private async mapTensorToPredictions(data: tf.Tensor) {
-        const features = tf.tidy(() => {
-            if (this.modelType === 'image') {
+        if (this._disposed) return [];
+        let features: tf.Tensor;
+        try {
+            // Use activationModel for both image and pose: it owns cloned weights
+            // and is independent from the main model lifecycle
+            features = tf.tidy(() => {
+                if (this._disposed) throw new Error('disposed');
                 const classes = this.activationModel.predict(data);
                 if (Array.isArray(classes)) throw new Error('unexpected_array');
                 return classes.softmax();
-            } else {
-                // For pose, use the actual model prediction
-                const classes = this.model.model.predict(data);
-                if (Array.isArray(classes)) throw new Error('unexpected_array');
-                return classes;
+            });
+        } catch (error) {
+            // Disposal race: silent. Any other error: log it.
+            if (error instanceof Error && error.message !== 'disposed') {
+                console.warn('CAM prediction failed:', error);
             }
-        });
+            return [];
+        }
         const values = await features.data();
         features.dispose();
-        
+        if (this._disposed) return [];
         const labels = this.model.getMetadata().labels;
-        
         if (!labels || labels.length === 0) {
-            console.warn('Model has no labels defined');
+            console.warn('CAM: model has no labels defined');
             return [];
         }
-        
-        if (values.length === 0) {
-            console.warn('Model prediction returned empty values');
-            return [];
-        }
-        
         const classes = [];
         for (let i = 0; i < Math.min(values.length, labels.length); i++) {
-            classes.push({
-                className: labels[i],
-                probability: values[i],
-            });
+            classes.push({ className: labels[i], probability: values[i] });
         }
         return classes;
     }
 
     private calculateActivations(finalConv: tf.Tensor, classIndex: number) {
+        if (this._disposed) throw new Error('disposed');
         return tf.tidy(() => {
             // 1. Reshape to a batch of features instead of GAP
             const batchFeatures = finalConv.reshape([7 * 7, 1280]);
@@ -207,6 +203,7 @@ export class CAM {
      * Returns array of 17 normalized importance values (one per keypoint)
      */
     private async calculateKeypointImportance(classIndex: number, poseInput: Float32Array): Promise<Float32Array> {
+        if (this._disposed) throw new Error('Model is disposed');
         return tf.tidy(() => {
             // Get the weights from both dense layers
             const layer1Weights = this.activationModel.layers[0].getWeights()[0]; // [34, 50]
@@ -258,6 +255,7 @@ export class CAM {
      * heatmapScores shape: [height, width, 17] where 17 is the number of keypoints
      */
     private calculatePoseActivations(heatmapScores: tf.Tensor3D, classIndex: number): tf.Tensor {
+        if (this._disposed) throw new Error('Model is disposed');
         return tf.tidy(() => {
             // Get dense layer weights to determine keypoint importance
             const firstLayerWeights = this.activationModel.layers[0].getWeights()[0];
@@ -316,104 +314,28 @@ export class CAM {
     }
 
     private async createImageCAM(image: HTMLCanvasElement) {
-        if (!this.exposedMobileNet) throw new Error('exposedMobileNet not initialized');
-        
-        const mobileNet = this.model as TeachableMobileNet;
-        const croppedImage = cropTo(image, mobileNet.getMetadata().imageSize || 0, false);
-        const imageTensor = capture(croppedImage);
-        const layerOutputs = this.exposedMobileNet.predict(imageTensor);
-        imageTensor.dispose();
-        if (!Array.isArray(layerOutputs)) throw new Error('not_array');
+        if (this._disposed || !this.exposedMobileNet) throw new Error('exposedMobileNet not initialized');
 
-        const predictions = await this.mapTensorToPredictions(layerOutputs[1]);
-
-        // Get best index
-        const nameOfMax = predictions.reduce((prev, val) => (val.probability > prev.probability ? val : prev));
-        const ix = predictions.indexOf(nameOfMax);
-        const cam = this.calculateActivations(layerOutputs[0], this.selectedIndex !== null ? this.selectedIndex : ix);
-        const maxProbability = predictions[ix].probability;
-        const normPredictions =
-            this.selectedIndex === null
-                ? predictions
-                : predictions.map((p) => ({
-                      className: p.className,
-                      probability: p.probability / maxProbability,
-                  }));
-
-        layerOutputs.forEach((output) => {
-            output.dispose();
-        });
-
-        const resized = tf.tidy(() => {
-            const finalSum = cam.resizeBilinear([image.width, image.height], false, true);
-            const final = finalSum.mul(
-                normPredictions[this.selectedIndex !== null ? this.selectedIndex : ix].probability
-            );
-
-            return final.reshape([image.width, image.height]);
-        });
-        cam.dispose();
-
-        const finalData = (await resized.array()) as number[][];
-        resized.dispose();
-
-        return { predictions, classIndex: ix, heatmapData: finalData };
-    }
-
-    /**
-     * Create CAM explanation for a pose classification using CNN feature maps
-     * @param image The input image (used to extract CNN features from PoseNet backbone)
-     * @param poseOutput The pose output from PoseNet (17 keypoints x 2 = 34 values)
-     */
-    public async createPoseCAM(image: HTMLCanvasElement, poseOutput: Float32Array) {
-        if (this.modelType !== 'pose') {
-            throw new Error('Use createCAM for image models');
-        }
-
-        const poseNet = this.model as TeachablePoseNet;
-        
-        // Get predictions from pose output
-        const inputTensor = tf.tensor2d([Array.from(poseOutput)]);
-        const predictions = await this.mapTensorToPredictions(inputTensor);
-        inputTensor.dispose();
-
-        if (!predictions || predictions.length === 0) {
-            throw new Error('No predictions available - model may not be trained');
-        }
-
-        // Get the predicted class or use selected class
-        const nameOfMax = predictions.reduce((prev, val) => (val.probability > prev.probability ? val : prev));
-        const ix = predictions.indexOf(nameOfMax);
-        const targetClass = this.selectedIndex !== null ? this.selectedIndex : ix;
-
+        const emptyHeatmap = Array(image.height).fill(0).map(() => Array(image.width).fill(0));
         try {
-            // Prepare image for PoseNet (resize to inputResolution)
-            const inputResolution = poseNet.posenetModel.inputResolution;
-            const resWidth = Array.isArray(inputResolution) ? inputResolution[0] : inputResolution;
-            const resHeight = Array.isArray(inputResolution) ? inputResolution[1] : inputResolution;
-            
-            const resizedCanvas = document.createElement('canvas');
-            resizedCanvas.width = resWidth;
-            resizedCanvas.height = resHeight;
-            const ctx = resizedCanvas.getContext('2d');
-            if (!ctx) throw new Error('Failed to get canvas context');
-            ctx.drawImage(image, 0, 0, resWidth, resHeight);
-            
-            // Get CNN feature maps from PoseNet's MobileNet backbone
-            const imageTensor = tf.browser.fromPixels(resizedCanvas);
-            const preprocessed = poseNet.posenetModel.baseModel.preprocessInput(tf.cast(imageTensor, 'float32') as tf.Tensor3D);
-            
-            // Use baseModel.predict to get heatmap scores (contains CNN spatial features)
-            const { heatmapScores } = poseNet.posenetModel.baseModel.predict(preprocessed);
-            
+            const mobileNet = this.model as TeachableMobileNet;
+            const croppedImage = cropTo(image, mobileNet.getMetadata().imageSize || 0, false);
+            const imageTensor = capture(croppedImage);
+            if (this._disposed) { imageTensor.dispose(); throw new Error('disposed'); }
+            const layerOutputs = this.exposedMobileNet.predict(imageTensor);
             imageTensor.dispose();
-            preprocessed.dispose();
+            if (!Array.isArray(layerOutputs)) throw new Error('not_array');
 
-            // Calculate CAM from heatmap features (17 keypoint channels)
-            const cam = this.calculatePoseActivations(heatmapScores, targetClass);
-            heatmapScores.dispose();
+            const predictions = await this.mapTensorToPredictions(layerOutputs[1]);
+            if (this._disposed || predictions.length === 0) {
+                layerOutputs.forEach((o) => o.dispose());
+                return { predictions: [], classIndex: 0, heatmapData: emptyHeatmap };
+            }
 
-            // Normalize predictions
+            // Get best index 
+            const nameOfMax = predictions.reduce((prev, val) => (val.probability > prev.probability ? val : prev));
+            const ix = predictions.indexOf(nameOfMax);
+            const cam = this.calculateActivations(layerOutputs[0], this.selectedIndex !== null ? this.selectedIndex : ix);
             const maxProbability = predictions[ix].probability;
             const normPredictions =
                 this.selectedIndex === null
@@ -423,9 +345,99 @@ export class CAM {
                           probability: p.probability / maxProbability,
                       }));
 
-            // Resize CAM to original image size
+            layerOutputs.forEach((output) => output.dispose());
+
+            if (this._disposed) { cam.dispose(); return { predictions: [], classIndex: 0, heatmapData: emptyHeatmap }; }
+
             const resized = tf.tidy(() => {
-                const cam3d = cam.expandDims(2) as tf.Tensor3D; // Add channel dimension
+                const finalSum = cam.resizeBilinear([image.width, image.height], false, true);
+                const final = finalSum.mul(
+                    normPredictions[this.selectedIndex !== null ? this.selectedIndex : ix].probability
+                );
+                return final.reshape([image.width, image.height]);
+            });
+            cam.dispose();
+
+            const finalData = (await resized.array()) as number[][];
+            resized.dispose();
+            return { predictions, classIndex: ix, heatmapData: finalData };
+        } catch (error) {
+            if (!this._disposed) {
+                console.warn('CAM (image) generation failed:', error);
+            }
+            return { predictions: [], classIndex: 0, heatmapData: emptyHeatmap };
+        }
+    }
+
+    /**
+     * Create CAM explanation for a pose classification using CNN feature maps
+     * @param image The input image (used to extract CNN features from PoseNet backbone)
+     * @param poseOutput The pose output from PoseNet (17 keypoints x 2 = 34 values)
+     */
+    public async createPoseCAM(image: HTMLCanvasElement, poseOutput: Float32Array) {
+        if (this._disposed) return { predictions: [], classIndex: 0, heatmapData: [] as number[][] };
+        if (this.modelType !== 'pose') throw new Error('Use createCAM for image models');
+
+        const emptyHeatmap = Array(image.height).fill(0).map(() => Array(image.width).fill(0));
+        const poseNet = this.model as TeachablePoseNet;
+
+        // Step 1: get predictions via activationModel (owns cloned weights, safe after dispose)
+        let predictions: Awaited<ReturnType<typeof this.mapTensorToPredictions>>;
+        try {
+            const inputTensor = tf.tensor2d([Array.from(poseOutput)]);
+            predictions = await this.mapTensorToPredictions(inputTensor);
+            inputTensor.dispose();
+        } catch {
+            return { predictions: [], classIndex: 0, heatmapData: emptyHeatmap };
+        }
+
+        // Guard: dispose() may have fired during the await above
+        if (this._disposed || !predictions || predictions.length === 0) {
+            return { predictions: [], classIndex: 0, heatmapData: emptyHeatmap };
+        }
+
+        const nameOfMax = predictions.reduce((prev, val) => (val.probability > prev.probability ? val : prev));
+        const ix = predictions.indexOf(nameOfMax);
+        const targetClass = this.selectedIndex !== null ? this.selectedIndex : ix;
+
+        // Step 2: CNN feature extraction — silently bail on any disposal error
+        try {
+            // Guard: dispose() may have fired during the predictions await
+            if (this._disposed) return { predictions, classIndex: targetClass, heatmapData: emptyHeatmap };
+
+            const inputResolution = poseNet.posenetModel.inputResolution;
+            const resWidth = Array.isArray(inputResolution) ? inputResolution[0] : inputResolution;
+            const resHeight = Array.isArray(inputResolution) ? inputResolution[1] : inputResolution;
+
+            const resizedCanvas = document.createElement('canvas');
+            resizedCanvas.width = resWidth;
+            resizedCanvas.height = resHeight;
+            const ctx = resizedCanvas.getContext('2d');
+            if (!ctx) throw new Error('canvas_context');
+            ctx.drawImage(image, 0, 0, resWidth, resHeight);
+
+            const imageTensor = tf.browser.fromPixels(resizedCanvas);
+            const preprocessed = poseNet.posenetModel.baseModel.preprocessInput(tf.cast(imageTensor, 'float32') as tf.Tensor3D);
+            const { heatmapScores } = poseNet.posenetModel.baseModel.predict(preprocessed);
+            imageTensor.dispose();
+            preprocessed.dispose();
+
+            if (this._disposed) { heatmapScores.dispose(); return { predictions, classIndex: targetClass, heatmapData: emptyHeatmap }; }
+
+            const cam = this.calculatePoseActivations(heatmapScores, targetClass);
+            heatmapScores.dispose();
+
+            const maxProbability = predictions[ix].probability;
+            const normPredictions =
+                this.selectedIndex === null
+                    ? predictions
+                    : predictions.map((p) => ({
+                          className: p.className,
+                          probability: p.probability / maxProbability,
+                      }));
+
+            const resized = tf.tidy(() => {
+                const cam3d = cam.expandDims(2) as tf.Tensor3D;
                 const finalSum = cam3d.resizeBilinear([image.height, image.width], false, true);
                 const final = finalSum.mul(normPredictions[targetClass].probability);
                 return final.reshape([image.height, image.width]);
@@ -435,18 +447,18 @@ export class CAM {
             const finalData = (await resized.array()) as number[][];
             resized.dispose();
 
-            // Also calculate keypoint importance for better visualization
+            // Guard after the last await
+            if (this._disposed) return { predictions, classIndex: targetClass, heatmapData: emptyHeatmap };
+
             const keypointImportance = await this.calculateKeypointImportance(targetClass, poseOutput);
 
             return { predictions: normPredictions, classIndex: targetClass, heatmapData: finalData, keypointImportance };
         } catch (error) {
-            console.warn('CAM generation failed, returning predictions without heatmap:', error);
-            // Return predictions without heatmap if CAM generation fails
-            return { 
-                predictions, 
-                classIndex: targetClass, 
-                heatmapData: Array(image.height).fill(0).map(() => Array(image.width).fill(0)) 
-            };
+            // Disposal during model switch: silent. Genuine failure: warn.
+            if (!this._disposed) {
+                console.warn('CAM (pose) generation failed:', error);
+            }
+            return { predictions, classIndex: targetClass, heatmapData: emptyHeatmap };
         }
     }
 }

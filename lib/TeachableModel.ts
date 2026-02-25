@@ -58,6 +58,7 @@ export default class TeachableModel {
     private lastPose?: Pose;
     private busy = false;
     private imageSize = 224;
+    private _disposed = false;
     public variant: TMType = 'image';
     public explained?: HTMLCanvasElement;
     private CAMModel?: CAM;
@@ -276,55 +277,82 @@ export default class TeachableModel {
     /* Preechakul et al., Improved image classification explainability with high-accuracy heatmaps, iScience 25, March 18, 2022. https://doi.org/10.1016/j.isci.2022.103933 */
 
     public async predict(image: HTMLCanvasElement): Promise<ExplainedPredictionsOutput> {
-        if (!this.trained) return { predictions: [] };
+        if (!this.trained || this._disposed) return { predictions: [] };
 
         if (this.imageModel) {
             if (this.explained && this.CAMModel) {
-                const camResult = await this.CAMModel.createCAM(image);
-                renderHeatmap(image, this.explained, camResult.heatmapData);
-                return { predictions: camResult.predictions };
-            } else {
-                const predictions = await this.imageModel.predict(image);
-                return { predictions };
-            }
-        } else if (this.poseModel) {
-            // For validation: always get fresh pose estimation, don't rely on cached lastPoseOut
-            // This ensures accurate predictions even when called rapidly or out of sequence
-            const { pose, posenetOutput } = await this.poseModel.estimatePose(image);
-            
-            if (!posenetOutput || posenetOutput.length === 0) {
-                console.warn('Failed to extract pose from image');
-                return { predictions: [] };
-            }
-            
-            // Always draw pose skeleton on canvas for pose models
-            if (pose) {
-                const ctx = image.getContext('2d');
-                if (ctx) {
-                    drawKeypoints(pose.keypoints, 0.5, ctx);
-                    drawSkeleton(pose.keypoints, 0.5, ctx);
-                }
-            }
-            
-            // If XAI is enabled, generate explanations
-            if (this.explained && this.CAMModel && pose) {
                 try {
-                    const camResult = await this.CAMModel.createPoseCAM(image, posenetOutput);
-                    // Use keypoint-importance visualization if available, otherwise fall back to heatmap
-                    if (camResult.keypointImportance) {
-                        renderPoseXAI(image, this.explained, pose.keypoints, camResult.keypointImportance, 0.3);
-                    } else {
+                    const cam = this.CAMModel;
+                    const camResult = await cam.createCAM(image);
+                    if (cam.isDisposed()) this.CAMModel = undefined;
+                    if (this.explained && camResult.heatmapData.length > 0) {
                         renderHeatmap(image, this.explained, camResult.heatmapData);
                     }
                     return { predictions: camResult.predictions };
                 } catch (error) {
-                    console.warn('XAI generation failed, falling back to standard prediction:', error);
-                    const predictions = await this.poseModel.predict(posenetOutput);
-                    return { predictions };
+                    // Disposal during switch: silent. Genuine failure: warn and fall through.
+                    if (!this._disposed) console.warn('XAI (image) failed, falling back to standard predict:', error);
                 }
-            } else {
+            }
+            if (this._disposed || !this.imageModel) return { predictions: [] };
+            try {
+                const predictions = await this.imageModel.predict(image);
+                return { predictions };
+            } catch {
+                return { predictions: [] };
+            }
+        } else if (this.poseModel) {
+            // Pose path: wrap entirely so disposal during any await is silent
+            let pose: { keypoints: { score: number; position: { y: number; x: number }; part: string }[]; score: number } | undefined;
+            let posenetOutput: Float32Array;
+            try {
+                const result = await this.poseModel.estimatePose(image);
+                pose = result.pose;
+                posenetOutput = result.posenetOutput;
+            } catch {
+                return { predictions: [] };
+            }
+
+            if (this._disposed || !this.poseModel) return { predictions: [] };
+            if (!posenetOutput || posenetOutput.length === 0) return { predictions: [] };
+
+            // Draw skeleton
+            if (pose) {
+                const ctx = image.getContext('2d');
+                if (ctx) {
+                    try { 
+                        drawKeypoints(pose.keypoints, 0.5, ctx); 
+                        drawSkeleton(pose.keypoints, 0.5, ctx); 
+                    } catch { /* ignore */ }
+                }
+            }
+
+            // XAI path
+            if (this.explained && this.CAMModel && pose) {
+                const cam = this.CAMModel;
+                try {
+                    const camResult = await cam.createPoseCAM(image, posenetOutput);
+                    if (cam.isDisposed()) this.CAMModel = undefined;
+                    if (this._disposed || !this.poseModel) return { predictions: [] };
+                    if (this.explained && camResult.keypointImportance) {
+                        renderPoseXAI(image, this.explained, pose.keypoints, camResult.keypointImportance, 0.3);
+                    } else if (this.explained && camResult.heatmapData.length > 0) {
+                        renderHeatmap(image, this.explained, camResult.heatmapData);
+                    }
+                    return { predictions: camResult.predictions };
+                } catch (error) {
+                    // Disposal during switch: silent. Genuine failure: warn and fall through.
+                    if (!this._disposed) console.warn('XAI (pose) failed, falling back to standard predict:', error);
+                }
+            }
+
+            // Plain predict (no XAI or XAI failed/disposed)
+            if (this._disposed || !this.poseModel) return { predictions: [] };
+            try {
                 const predictions = await this.poseModel.predict(posenetOutput);
                 return { predictions };
+            } catch {
+                return { predictions: [] };
             }
         }
         return { predictions: [] };
@@ -402,6 +430,7 @@ export default class TeachableModel {
     }
 
     public dispose() {
+        this._disposed = true;
         // Dispose CAM first before disposing models, since CAM reference model layers
         if (this.CAMModel) {
             try {

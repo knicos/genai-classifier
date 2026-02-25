@@ -286,7 +286,7 @@ export class TeachableMobileNet extends CustomMobileNet {
             originalOnTrainEnd(logs);
         };
 
-        // Rest of trian function
+        // Rest of train function
         if (!this.isPrepared) {
             this.prepare();
         }
@@ -342,8 +342,6 @@ export class TeachableMobileNet extends CustomMobileNet {
 
         const trainData = this.trainDataset.batch(params.batchSize);
         const validationData = this.validationDataset.batch(params.batchSize);
-
-        // For debugging: check for shuffle or result from trainDataset
 
         await this.trainingModel.fitDataset(trainData, {
             epochs: params.epochs,
