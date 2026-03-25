@@ -1,11 +1,15 @@
 import { BehaviourType } from './behaviours';
-import TeachableModel, { ExplainedPredictionsOutput, TMType } from './TeachableModel';
+import { TeachableModel, ExplainedPredictionsOutput, TMType } from './TeachableModel';
 import * as tf from '@tensorflow/tfjs';
 import JSZip from 'jszip';
 import EE from 'eventemitter3';
+import ImageModel from './ImageModel';
+import PoseModel from './PoseModel';
+import SoundModel from './SpeechModel';
+import { AudioExample } from './gtm-utils/recorder';
 
 export interface ISample {
-    data: HTMLCanvasElement;
+    data: HTMLCanvasElement | AudioExample;
     id: string;
 }
 
@@ -43,6 +47,24 @@ export interface PredictionsOutput extends ExplainedPredictionsOutput {
 }
 
 type ClassifierAppEvents = 'loading' | 'ready' | 'epoch' | 'training' | 'trainingcomplete' | 'error' | 'action';
+
+export function createModel(
+    variant: TMType,
+    metadata?: any,
+    model?: tf.io.ModelJSON,
+    weights?: ArrayBuffer
+): TeachableModel {
+    switch (variant) {
+        case 'image':
+            return new ImageModel(variant, metadata, model, weights);
+        case 'pose':
+            return new PoseModel(variant, metadata, model, weights);
+        case 'speech':
+            return new SoundModel(variant);
+        default:
+            throw new Error(`Unsupported model variant: ${variant}`);
+    }
+}
 
 export default class ClassifierApp extends EE<ClassifierAppEvents> {
     public model?: TeachableModel;
@@ -91,7 +113,7 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
         }
     }
 
-    public async predict(image: HTMLCanvasElement): Promise<PredictionsOutput> {
+    public async predict(image: HTMLCanvasElement | AudioExample): Promise<PredictionsOutput> {
         if (this.model) {
             const predictions = await this.model.predict(image);
 
@@ -126,7 +148,7 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
 
         this.emit('training');
 
-        const newModel = new TeachableModel(this.variant);
+        const newModel = createModel(this.variant);
 
         this.emit('loading');
         await newModel.ready();
@@ -178,9 +200,11 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
                     const s = this.samples[j];
                     for (let i = 0; i < s.length; ++i) {
                         const ss = s[i];
-                        folder.file(`${j}_${i}.png`, ss.data.toDataURL('image/png').split(';base64,')[1], {
-                            base64: true,
-                        });
+                        if (ss.data instanceof HTMLCanvasElement) {
+                            folder.file(`${j}_${i}.png`, ss.data.toDataURL('image/png').split(';base64,')[1], {
+                                base64: true,
+                            });
+                        }
                     }
                 }
             }
@@ -300,7 +324,7 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
 
             const parsedModel = JSON.parse(project.modelJson) as tf.io.ModelJSON;
 
-            const model = new TeachableModel('image', meta, parsedModel, project.modelWeights);
+            const model = createModel('image', meta, parsedModel, project.modelWeights);
             await model.ready();
 
             const samplePromises: Promise<HTMLCanvasElement>[] = [];
@@ -339,7 +363,7 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
                 samples.push(newImage.map((i) => ({ data: i, id: '' })));
             }
 
-            const tm = new TeachableModel('image', meta, parsedModel, project.modelWeights);
+            const tm = createModel('image', meta, parsedModel, project.modelWeights);
 
             await tm.ready();
 

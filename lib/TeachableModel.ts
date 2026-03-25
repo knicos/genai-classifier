@@ -1,34 +1,15 @@
-import { TeachableMobileNet, Metadata as ImageMetadata, createTeachable as createImage } from './gtm-image';
+import { TeachableMobileNet, Metadata as ImageMetadata } from './gtm-image';
 import { TrainingParameters as ImageTrainingParams } from './gtm-image/teachable-mobilenet';
 import { TrainingParameters as PoseTrainingParams } from './gtm-pose/teachable-posenet';
-import {
-    TeachablePoseNet,
-    Metadata as PoseMetadata,
-    drawKeypoints,
-    drawSkeleton,
-    createTeachable as createPose,
-} from './gtm-pose';
+import { TeachablePoseNet, Metadata as PoseMetadata } from './gtm-pose';
 import * as tf from '@tensorflow/tfjs';
-import { renderHeatmap, renderPoseXAI } from './heatmap';
-import { CAM } from './xai';
+import { AudioExample } from './gtm-utils/recorder';
+import TeachableSpeechCommands, {
+    SoundTrainingParams,
+    TeachableSpeechCommandsMetadata,
+} from './speech-commands/TeachableSpeechCommands';
 
-export type TMType = 'image' | 'pose';
-
-type Vector2D = {
-    y: number;
-    x: number;
-};
-
-type Keypoint = {
-    score: number;
-    position: Vector2D;
-    part: string;
-};
-
-type Pose = {
-    keypoints: Keypoint[];
-    score: number;
-};
+export type TMType = 'image' | 'pose' | 'speech' | 'text';
 
 export interface PredictionsOutput {
     className: string;
@@ -40,487 +21,66 @@ export interface ExplainedPredictionsOutput {
     heatmap?: number[][];
 }
 
-interface TrainingParameters extends ImageTrainingParams, PoseTrainingParams {}
+interface TrainingParameters extends ImageTrainingParams, PoseTrainingParams, SoundTrainingParams {}
 
 interface BaseMetadata {
     modelBaseUrl?: string;
 }
 
-export type Metadata = BaseMetadata & (ImageMetadata | PoseMetadata);
+export type Metadata = BaseMetadata & (ImageMetadata | PoseMetadata | TeachableSpeechCommandsMetadata);
 
-const NULLARRAY: string[] = [];
+export interface TeachableModel {
+    readonly variant: TMType;
+    explained?: HTMLCanvasElement;
+    readonly modelBaseUrl: string;
 
-export default class TeachableModel {
-    private imageModel?: TeachableMobileNet;
-    private poseModel?: TeachablePoseNet;
-    private _ready?: Promise<boolean>;
-    private trained = false;
-    private lastPose?: Pose;
-    private busy = false;
-    private imageSize = 224;
-    private _disposed = false;
-    public variant: TMType = 'image';
-    public explained?: HTMLCanvasElement;
-    private CAMModel?: CAM;
-    private modelBaseUrl = 'https://tmstore.blob.core.windows.net/models';
+    // constructor(type: TMType, metadata?: Metadata, model?: tf.io.ModelJSON, weights?: ArrayBuffer);
 
-    constructor(type: TMType, metadata?: Metadata, model?: tf.io.ModelJSON, weights?: ArrayBuffer) {
-        this._ready = new Promise((resolve) => {
-            let atype = type;
-            if (metadata?.packageName) {
-                if (metadata.packageName === '@teachablemachine/pose') {
-                    atype = 'pose';
-                } else if (metadata.packageName === '@teachablemachine/image') {
-                    atype = 'image';
-                }
-            }
+    setXAICanvas(canvas: HTMLCanvasElement): void;
 
-            this.variant = atype;
+    setXAIClass(className: string | number | null): void;
 
-            if (metadata?.modelBaseUrl) {
-                this.modelBaseUrl = metadata.modelBaseUrl;
-            }
+    setName(name: string): void;
 
-            if (atype === 'image') {
-                this.loadImage(metadata, model, weights).then(() => {
-                    resolve(true);
-                });
-            } else if (atype === 'pose') {
-                this.loadPose(metadata as PoseMetadata, model, weights).then(() => resolve(true));
-            } else {
-                resolve(false);
-            }
-        });
-    }
+    getModel(): TeachableMobileNet | TeachablePoseNet | TeachableSpeechCommands | undefined;
 
-    public setXAICanvas(canvas: HTMLCanvasElement) {
-        if (this.imageModel) {
-            this.explained = canvas;
-            if (!this.CAMModel) {
-                this.CAMModel = new CAM(this.imageModel);
-            }
-            return;
-        } else if (this.poseModel) {
-            this.explained = canvas;
-            if (!this.CAMModel) {
-                this.CAMModel = new CAM(this.poseModel);
-            }
-            return;
-        }
-        throw new Error('no_model');
-    }
+    getImageSize(): number;
 
-    public setXAIClass(className: string | number | null) {
-        if (this.CAMModel) {
-            if (className === null) {
-                this.CAMModel.setSelectedIndex(null);
-                return;
-            }
-            const ix = typeof className === 'number' 
-                ? className 
-                : (this.imageModel?.getLabels() || this.poseModel?.getLabels() || []).indexOf(className);
-            this.CAMModel.setSelectedIndex(ix === undefined || ix === -1 ? null : ix);
-        }
-    }
+    isTrained(): boolean;
 
-    public setName(name: string) {
-        if (this.imageModel) {
-            this.imageModel.setName(name);
-        } else if (this.poseModel) {
-            this.poseModel.setName(name);
-        }
-    }
+    ready(): Promise<boolean>;
 
-    public getVariant() {
-        return this.variant;
-    }
+    isReady(): boolean;
 
-    public getImageModel() {
-        return this.imageModel;
-    }
+    setSeed(seed: string): void;
 
-    public getPoseModel() {
-        return this.poseModel;
-    }
+    getMetadata(): Metadata | undefined;
 
-    public getImageSize() {
-        return this.imageSize;
-    }
+    save(handler: tf.io.IOHandler): Promise<tf.io.SaveResult | undefined>;
 
-    public isTrained() {
-        return this.trained;
-    }
+    draw(image: HTMLCanvasElement): HTMLCanvasElement;
 
-    private async loadImage(metadata?: ImageMetadata, model?: tf.io.ModelJSON, weights?: ArrayBuffer) {
-        await tf.ready();
-        if (metadata && model && weights) {
-            const tmmodel = await createImage(metadata, {
-                version: 2,
-                alpha: 0.35,
-                modelBaseUrl: this.modelBaseUrl,
-            });
-            tmmodel.model = await tf.loadLayersModel({
-                load: async () => {
-                    return {
-                        modelTopology: model.modelTopology,
-                        weightData: weights,
-                        weightSpecs: model.weightsManifest[0].weights,
-                    };
-                },
-            });
-            this.imageModel = tmmodel;
-            this.trained = true;
-        } else {
-            const tmmodel = await createImage({ tfjsVersion: tf.version.tfjs }, { version: 2, alpha: 0.35 });
-            this.imageModel = tmmodel;
-            tmmodel.setName('My Model');
-        }
+    estimate(image: HTMLCanvasElement): Promise<HTMLCanvasElement>;
 
-        this.imageSize = this.imageModel.getMetadata().imageSize || 224;
-    }
+    predict(image: HTMLCanvasElement | AudioExample): Promise<ExplainedPredictionsOutput>;
 
-    private async loadPose(metadata?: PoseMetadata, model?: tf.io.ModelJSON, weights?: ArrayBuffer) {
-        await tf.ready();
-        if (metadata && model && weights) {
-            this.trained = true;
-            const tmmodel = await createPose(metadata);
-            tmmodel.model = await tf.loadLayersModel({
-                load: async () => {
-                    return {
-                        modelTopology: model.modelTopology,
-                        weightData: weights,
-                        weightSpecs: model.weightsManifest[0].weights,
-                    };
-                },
-            });
-            this.poseModel = tmmodel;
-        } else {
-            const tmmodel = await createPose({ tfjsVersion: tf.version.tfjs });
-            this.poseModel = tmmodel;
-            tmmodel.setName('My Model');
-        }
+    train(params: TrainingParameters, callbacks: tf.CustomCallbackArgs): Promise<unknown>;
 
-         
-        this.imageSize = (this.poseModel.getMetadata().modelSettings as any)?.posenet?.inputResolution || 257;
-    }
+    addExample(className: number, image: HTMLCanvasElement | AudioExample): Promise<void>;
 
-    public async ready() {
-        return this.isReady() || this._ready || false;
-    }
+    setLabels(labels: string[]): void;
 
-    public isReady() {
-        return !!(this.imageModel || this.poseModel);
-    }
+    dispose(): void;
 
-    public setSeed(seed: string) {
-        if (this.imageModel) {
-            this.imageModel.setSeed(seed);
-        } else if (this.poseModel) {
-            this.poseModel.setSeed(seed);
-        }
-    }
+    getLabels(): string[];
 
-    public getMetadata() {
-        if (this.imageModel) {
-            return this.imageModel.getMetadata();
-        } else if (this.poseModel) {
-            return this.poseModel.getMetadata();
-        }
-    }
+    getLabel(ix: number): string;
 
-    public async save(handler: tf.io.IOHandler) {
-        if (this.imageModel) {
-            return this.imageModel.save(handler);
-        } else if (this.poseModel) {
-            return this.poseModel.save(handler);
-        }
-    }
+    getNumExamples(): number;
 
-    /**
-     * If a pose is available, draw the keypoints and skeleton.
-     *
-     * @param image Image to draw the pose into.
-     */
-    public draw(image: HTMLCanvasElement) {
-        if (this.poseModel && this.lastPose) {
-            const ctx = image.getContext('2d');
-            if (this.lastPose && ctx) {
-                try {
-                    drawKeypoints(this.lastPose.keypoints, 0.5, ctx);
-                    drawSkeleton(this.lastPose.keypoints, 0.5, ctx);
-                } catch (e) {
-                    console.error(e);
-                }
-            }
-        }
-    }
+    getExamplesPerClass(): number[];
 
-    /**
-     * Estimate pose if this is a PoseNet model, otherwise do nothing.
-     * This caches the pose so draw() can use it without re-estimating.
-     *
-     * @param image Input image at correct resolution
-     */
-    public async estimate(image: HTMLCanvasElement): Promise<void> {
-        if (this.poseModel && !this.busy) {
-            this.busy = true;
-            try {
-                const poseData = await this.poseModel.estimatePose(image);
-                this.lastPose = poseData.pose;
-            } catch (e) {
-                console.error('Estimation error', e);
-            }
-            this.busy = false;
-        }
-    }
+    getNumValidation(): number;
 
-    /* Preechakul et al., Improved image classification explainability with high-accuracy heatmaps, iScience 25, March 18, 2022. https://doi.org/10.1016/j.isci.2022.103933 */
-
-    public async predict(image: HTMLCanvasElement): Promise<ExplainedPredictionsOutput> {
-        if (!this.trained || this._disposed) return { predictions: [] };
-
-        if (this.imageModel) {
-            if (this.explained && this.CAMModel) {
-                try {
-                    const cam = this.CAMModel;
-                    const camResult = await cam.createCAM(image);
-                    if (cam.isDisposed()) this.CAMModel = undefined;
-                    if (this.explained && camResult.heatmapData.length > 0) {
-                        renderHeatmap(image, this.explained, camResult.heatmapData);
-                    }
-                    return { predictions: camResult.predictions };
-                } catch (error) {
-                    // Disposal during switch: silent. Genuine failure: warn and fall through.
-                    if (!this._disposed) console.warn('XAI (image) failed, falling back to standard predict:', error);
-                }
-            }
-            if (this._disposed || !this.imageModel) return { predictions: [] };
-            try {
-                const predictions = await this.imageModel.predict(image);
-                return { predictions };
-            } catch {
-                return { predictions: [] };
-            }
-        } else if (this.poseModel) {
-            // Pose path: wrap entirely so disposal during any await is silent
-            let pose: { keypoints: { score: number; position: { y: number; x: number }; part: string }[]; score: number } | undefined;
-            let posenetOutput: Float32Array;
-            try {
-                const result = await this.poseModel.estimatePose(image);
-                pose = result.pose;
-                posenetOutput = result.posenetOutput;
-            } catch {
-                return { predictions: [] };
-            }
-
-            if (this._disposed || !this.poseModel) return { predictions: [] };
-            if (!posenetOutput || posenetOutput.length === 0) return { predictions: [] };
-
-            // Draw skeleton
-            if (pose) {
-                const ctx = image.getContext('2d');
-                if (ctx) {
-                    try { 
-                        drawKeypoints(pose.keypoints, 0.5, ctx); 
-                        drawSkeleton(pose.keypoints, 0.5, ctx); 
-                    } catch { /* ignore */ }
-                }
-            }
-
-            // XAI path
-            if (this.explained && this.CAMModel && pose) {
-                const cam = this.CAMModel;
-                try {
-                    const camResult = await cam.createPoseCAM(image, posenetOutput);
-                    if (cam.isDisposed()) this.CAMModel = undefined;
-                    if (this._disposed || !this.poseModel) return { predictions: [] };
-                    if (this.explained && camResult.keypointImportance) {
-                        renderPoseXAI(image, this.explained, pose.keypoints, camResult.keypointImportance, 0.3);
-                    } else if (this.explained && camResult.heatmapData.length > 0) {
-                        renderHeatmap(image, this.explained, camResult.heatmapData);
-                    }
-                    return { predictions: camResult.predictions };
-                } catch (error) {
-                    // Disposal during switch: silent. Genuine failure: warn and fall through.
-                    if (!this._disposed) console.warn('XAI (pose) failed, falling back to standard predict:', error);
-                }
-            }
-
-            // Plain predict (no XAI or XAI failed/disposed)
-            if (this._disposed || !this.poseModel) return { predictions: [] };
-            try {
-                const predictions = await this.poseModel.predict(posenetOutput);
-                return { predictions };
-            } catch {
-                return { predictions: [] };
-            }
-        }
-        return { predictions: [] };
-    }
-
-    /**
-     * Predict directly from pose output data (for validation/internal use)
-     */
-    public async predictFromPoseData(poseData: Float32Array): Promise<ExplainedPredictionsOutput> {
-        if (!this.poseModel) {
-            console.warn('VALIDATION ERROR: Pose model not initialized');
-            return { predictions: [] };
-        }
-        if (!this.poseModel.model) {
-            console.warn('VALIDATION ERROR: Pose model.model is null');
-            return { predictions: [] };
-        }
-        if (this.poseModel.model.layers.length === 0) {
-            console.warn('VALIDATION ERROR: Pose model has no layers');
-            return { predictions: [] };
-        }
-
-        try {
-            const predictions = await this.poseModel.predict(poseData);
-
-            if (!predictions || predictions.length === 0) {
-                console.warn('VALIDATION ERROR: Pose model returned empty predictions');
-            }
-            return { predictions };
-        } catch (error) {
-            console.error('VALIDATION ERROR during pose prediction:', error);
-            return { predictions: [] };
-        }
-    }
-
-    public async train(params: TrainingParameters, callbacks: tf.CustomCallbackArgs) {
-        this.trained = false;
-        if (this.imageModel) {
-            return this.imageModel.train(params, callbacks).then((m) => {
-                if (this.imageModel) {
-                    if (this.CAMModel) this.CAMModel.dispose();
-                    this.CAMModel = new CAM(this.imageModel);
-                }
-                this.trained = true;
-                return m;
-            });
-        } else if (this.poseModel) {
-            return this.poseModel.train(params, callbacks).then((m) => {
-                if (this.poseModel) {
-                    if (this.CAMModel) this.CAMModel.dispose();
-                    this.CAMModel = new CAM(this.poseModel);
-                }
-                this.trained = true;
-                return m;
-            });
-        }
-    }
-
-    public async addExample(className: number, image: HTMLCanvasElement) {
-        if (this.imageModel) {
-            return this.imageModel.addExample(className, image);
-        } else if (this.poseModel) {
-            const { heatmapScores, offsets } = await this.poseModel.estimatePoseOutputs(image);
-            const posenetOutput = this.poseModel.poseOutputsToAray(heatmapScores, offsets);
-            return this.poseModel.addExample(className, posenetOutput);
-        }
-    }
-
-    public setLabels(labels: string[]) {
-        if (this.imageModel) {
-            this.imageModel.setLabels(labels);
-        } else if (this.poseModel) {
-            this.poseModel.setLabels(labels);
-        }
-    }
-
-    public dispose() {
-        this._disposed = true;
-        // Dispose CAM first before disposing models, since CAM reference model layers
-        if (this.CAMModel) {
-            try {
-                this.CAMModel.dispose();
-            } catch (error) {
-                console.warn('Error disposing CAM model:', error);
-            }
-        }
-        
-        // Then dispose the actual models
-        if (this.imageModel) {
-            try {
-                if (this.imageModel.isTrained) {
-                    this.imageModel.dispose();
-                } else {
-                    this.imageModel.model?.dispose();
-                }
-            } catch (error) {
-                console.warn('Error disposing image model:', error);
-            }
-        }
-        if (this.poseModel) {
-            try {
-                if (this.poseModel.isTrained) {
-                    this.poseModel.dispose();
-                } else {
-                    this.poseModel.model?.dispose();
-                }
-            } catch (error) {
-                console.warn('Error disposing pose model:', error);
-            }
-        }
-        this.imageModel = undefined;
-        this.poseModel = undefined;
-        this.CAMModel = undefined;
-        // Pose state is no longer cached
-    }
-
-    public getLabels(): string[] {
-        if (this.imageModel) {
-            return this.imageModel.getLabels();
-        } else if (this.poseModel) {
-            return this.poseModel.getLabels();
-        }
-        return NULLARRAY;
-    }
-
-    public getLabel(ix: number): string {
-        if (this.imageModel) {
-            return this.imageModel.getLabel(ix);
-        } else if (this.poseModel) {
-            return this.poseModel.getLabel(ix);
-        }
-        return '';
-    }
-
-    public getNumExamples(): number {
-        if (this.imageModel) {
-            return this.imageModel.examples.reduce((t, e) => t + e.length, 0);
-        } else if (this.poseModel) {
-            return this.poseModel.examples.reduce((t, e) => t + e.length, 0);
-        }
-        return 0;
-    }
-
-    public getExamplesPerClass(): number[] {
-        if (this.imageModel) {
-            return this.imageModel.examples.map((e) => e.length);
-        } else if (this.poseModel) {
-            return this.poseModel.examples.map((e) => e.length);
-        }
-        return [];
-    }
-
-    public getNumValidation(): number {
-        if (this.imageModel) {
-            return this.imageModel.examples.reduce((t, e) => t + Math.ceil(e.length * 0.15), 0);
-        } else if (this.poseModel) {
-            return this.poseModel.examples.reduce((t, e) => t + Math.ceil(e.length * 0.15), 0);
-        }
-        return 0;
-    }
-
-    public calculateAccuracy() {
-        if (this.imageModel) {
-            return this.imageModel.calculateAccuracyPerClass();
-        } else if (this.poseModel) {
-            return this.poseModel.calculateAccuracyPerClass();
-        } else {
-            throw new Error('no_model');
-        }
-    }
+    calculateAccuracy(): Promise<{ reference: any; predictions: tf.Tensor }>;
 }
