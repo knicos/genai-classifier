@@ -43,6 +43,7 @@
         "vitest": "^3.0.4"
     },
     "dependencies": {
+        "@tensorflow-models/hand-pose-detection": "^2.0.1",
         "@tensorflow/tfjs": "^4.22.0",
         "autobind-decorator": "^2.4.0",
         "eventemitter3": "^5.0.1",

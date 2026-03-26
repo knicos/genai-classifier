@@ -358,7 +358,6 @@ export class BrowserFftSpeechCommandRecognizer implements SpeechCommandRecognize
         this.nonBatchInputShape = model.inputs[0].shape.slice(1) as [number, number, number];
         this.elementsPerExample = 1;
         model.inputs[0].shape.slice(1).forEach((dimSize) => (this.elementsPerExample *= dimSize ?? 1));
-        console.log('Model loaded', this.elementsPerExample, this.id);
         this.warmUpModel();
         const frameDurationMillis = ((this.parameters.fftSize ?? 0) / (this.parameters.sampleRateHz ?? 1)) * 1e3;
         const numFrames = model.inputs[0].shape[1];
@@ -1082,12 +1081,6 @@ class TransferBrowserFftSpeechCommandRecognizer
         const datasetDurationMillisThreshold =
             config.fitDatasetDurationMillisThreshold == null ? 60e3 : config.fitDatasetDurationMillisThreshold;
         if (this.dataset.durationMillis() > datasetDurationMillisThreshold) {
-            console.log(
-                `Detected large dataset: total duration = ` +
-                    `${this.dataset.durationMillis()} ms > ` +
-                    `${datasetDurationMillisThreshold} ms. ` +
-                    `Training transfer model using fitDataset() instead of fit()`
-            );
             return this.trainOnDataset(config);
         } else {
             return this.trainOnTensors(config);
@@ -1107,19 +1100,15 @@ class TransferBrowserFftSpeechCommandRecognizer
             batchSize,
             { augmentByMixingNoiseRatio: config?.augmentByMixingNoiseRatio }
         );
-        const t0 = tf.util.now();
         const history = await this.model.fitDataset(trainDataset, {
             epochs: config?.epochs ?? 1,
             validationData: (config?.validationSplit ?? 0) > 0 ? valDataset : undefined,
             callbacks: config?.callback == null ? undefined : [config.callback],
         });
-        console.log(`fitDataset() took ${(tf.util.now() - t0).toFixed(2)} ms`);
 
         if (config?.fineTuningEpochs != null && config.fineTuningEpochs > 0) {
             // Perform fine-tuning.
-            const t0 = tf.util.now();
             const fineTuningHistory = await this.fineTuningUsingTfDatasets(config, trainDataset, valDataset);
-            console.log(`fitDataset() (fine-tuning) took ` + `${(tf.util.now() - t0).toFixed(2)} ms`);
             return [history, fineTuningHistory];
         } else {
             return history;
@@ -1133,7 +1122,6 @@ class TransferBrowserFftSpeechCommandRecognizer
         const { xs, ys } = this.collectTransferDataAsTensors(windowHopRatio, {
             augmentByMixingNoiseRatio: config?.augmentByMixingNoiseRatio,
         });
-        console.log(`Training data: xs.shape = ${xs.shape}, ys.shape = ${ys.shape}`);
 
         let trainXs: tf.Tensor | undefined = undefined;
         let trainYs: tf.Tensor | undefined = undefined;
@@ -1292,7 +1280,6 @@ class TransferBrowserFftSpeechCommandRecognizer
                 const tpr = truePositives / positives;
 
                 rocCurve.push({ probThreshold, fpr, tpr });
-                console.log(`ROC thresh=${probThreshold}: ` + `fpr=${fpr.toFixed(4)}, tpr=${tpr.toFixed(4)}`);
 
                 if (i > 0) {
                     // Accumulate to AUC.
@@ -1373,7 +1360,6 @@ class TransferBrowserFftSpeechCommandRecognizer
             metadataMap[this.name] = this.getMetadata();
             localStorageWrapper.localStorage?.setItem(SAVED_MODEL_METADATA_KEY, JSON.stringify(metadataMap));
         }
-        console.log(`Saving model to ${handlerOrURL}`);
         return this.model.save(handlerOrURL);
     }
 
@@ -1388,10 +1374,8 @@ class TransferBrowserFftSpeechCommandRecognizer
                 throw new Error(`Cannot find metadata for transfer model named ${this.name}"`);
             }
             this.words = metadataMap[this.name].wordLabels;
-            console.log(`Loaded word list for model named ${this.name}: ${this.words}`);
         }
         this.model = await tfl.loadLayersModel(handlerOrURL);
-        console.log(`Loaded model from ${handlerOrURL}:`);
         this.model.summary();
     }
 

@@ -9,7 +9,7 @@ import {
 import * as tf from '@tensorflow/tfjs';
 import { renderHeatmap, renderPoseXAI } from './heatmap';
 import { CAM } from './xai';
-import { TeachableModel, ExplainedPredictionsOutput, TMType } from './TeachableModel';
+import type { TeachableModel, ExplainedPredictionsOutput, TMType } from './TeachableModel';
 
 const NULLARRAY: string[] = [];
 
@@ -151,6 +151,7 @@ export default class PoseModel implements TeachableModel {
                 this.lastPose = poseData.pose;
             } catch (e) {
                 console.error('Estimation error', e);
+                this.lastPose = undefined;
             }
             this.busy = false;
         }
@@ -171,24 +172,16 @@ export default class PoseModel implements TeachableModel {
                 const result = await this.model.estimatePose(image);
                 pose = result.pose;
                 posenetOutput = result.posenetOutput;
+                this.lastPose = pose;
             } catch {
+                this.lastPose = undefined;
                 return { predictions: [] };
             }
 
             if (this._disposed || !this.model) return { predictions: [] };
-            if (!posenetOutput || posenetOutput.length === 0) return { predictions: [] };
-
-            // Draw skeleton
-            if (pose) {
-                const ctx = image.getContext('2d');
-                if (ctx) {
-                    try {
-                        drawKeypoints(pose.keypoints, 0.5, ctx);
-                        drawSkeleton(pose.keypoints, 0.5, ctx);
-                    } catch {
-                        /* ignore */
-                    }
-                }
+            if (!posenetOutput || posenetOutput.length === 0) {
+                this.lastPose = undefined;
+                return { predictions: [] };
             }
 
             // XAI path
@@ -298,6 +291,7 @@ export default class PoseModel implements TeachableModel {
             }
         }
         this.model = undefined;
+        this.lastPose = undefined;
         this.CAMModel = undefined;
     }
 

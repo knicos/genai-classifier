@@ -1,7 +1,9 @@
 import { TeachableMobileNet, Metadata as ImageMetadata } from './gtm-image';
 import { TrainingParameters as ImageTrainingParams } from './gtm-image/teachable-mobilenet';
-import { TrainingParameters as PoseTrainingParams } from './gtm-pose/teachable-posenet';
 import { TeachablePoseNet, Metadata as PoseMetadata } from './gtm-pose';
+import { TrainingParameters as PoseTrainingParams } from './gtm-pose/teachable-posenet';
+import { TeachableHandPose, Metadata as HandMetadata } from './gtm-hand';
+import { TrainingParameters as HandTrainingParams } from './gtm-hand/teachable-handpose';
 import * as tf from '@tensorflow/tfjs';
 import { AudioExample } from './gtm-utils/recorder';
 import TeachableSpeechCommands, {
@@ -9,7 +11,7 @@ import TeachableSpeechCommands, {
     TeachableSpeechCommandsMetadata,
 } from './speech-commands/TeachableSpeechCommands';
 
-export type TMType = 'image' | 'pose' | 'speech' | 'text';
+export type TMType = 'image' | 'pose' | 'speech' | 'hand' | 'text';
 
 export interface PredictionsOutput {
     className: string;
@@ -18,23 +20,22 @@ export interface PredictionsOutput {
 
 export interface ExplainedPredictionsOutput {
     predictions: PredictionsOutput[];
+    multiHandPredictions?: PredictionsOutput[][];
     heatmap?: number[][];
 }
 
-interface TrainingParameters extends ImageTrainingParams, PoseTrainingParams, SoundTrainingParams {}
+interface TrainingParameters extends ImageTrainingParams, PoseTrainingParams, HandTrainingParams, SoundTrainingParams {}
 
 interface BaseMetadata {
     modelBaseUrl?: string;
 }
 
-export type Metadata = BaseMetadata & (ImageMetadata | PoseMetadata | TeachableSpeechCommandsMetadata);
+export type Metadata = BaseMetadata & (ImageMetadata | PoseMetadata | HandMetadata | TeachableSpeechCommandsMetadata);
 
 export interface TeachableModel {
     readonly variant: TMType;
     explained?: HTMLCanvasElement;
     readonly modelBaseUrl: string;
-
-    // constructor(type: TMType, metadata?: Metadata, model?: tf.io.ModelJSON, weights?: ArrayBuffer);
 
     setXAICanvas(canvas: HTMLCanvasElement): void;
 
@@ -42,7 +43,7 @@ export interface TeachableModel {
 
     setName(name: string): void;
 
-    getModel(): TeachableMobileNet | TeachablePoseNet | TeachableSpeechCommands | undefined;
+    getModel(): TeachableMobileNet | TeachablePoseNet | TeachableHandPose | TeachableSpeechCommands | undefined;
 
     getImageSize(): number;
 

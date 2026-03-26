@@ -7,3 +7,8 @@ tsconfig.build.tsbuildinfo
 # ImageNet dataset samples
 lib/gtm-image/imagenet_samples/
 lib/gtm-image/Download imagenet.ipynb
+lib/gtm-image/imagenet_dataset.json
+
+scripts 
+models
+.DS_Store

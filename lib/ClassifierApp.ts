@@ -6,6 +6,7 @@ import EE from 'eventemitter3';
 import ImageModel from './ImageModel';
 import PoseModel from './PoseModel';
 import SoundModel from './SpeechModel';
+import HandModel from './HandModel';
 import { AudioExample } from './gtm-utils/recorder';
 
 export interface ISample {
@@ -61,6 +62,8 @@ export function createModel(
             return new PoseModel(variant, metadata, model, weights);
         case 'speech':
             return new SoundModel(variant);
+        case 'hand':
+            return new HandModel(variant, metadata, model, weights);
         default:
             throw new Error(`Unsupported model variant: ${variant}`);
     }
@@ -90,9 +93,7 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
     }
 
     public draw(image: HTMLCanvasElement) {
-        if (this.model) {
-            this.model.draw(image);
-        }
+        return this.model?.draw(image);
     }
 
     public async estimate(image: HTMLCanvasElement): Promise<void> {
@@ -116,6 +117,14 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
     public async predict(image: HTMLCanvasElement | AudioExample): Promise<PredictionsOutput> {
         if (this.model) {
             const predictions = await this.model.predict(image);
+
+            if (image instanceof HTMLCanvasElement) {
+                this.draw(image);
+            }
+
+            if (!predictions.predictions.length) {
+                return { ...predictions, nameOfMax: '', indexOfMax: -1, failed: true };
+            }
 
             const nameOfMax = predictions.predictions.reduce((prev, val) =>
                 val.probability > prev.probability ? val : prev
