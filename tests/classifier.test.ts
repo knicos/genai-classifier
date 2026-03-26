@@ -2,6 +2,7 @@ import { describe, it } from 'vitest';
 import { createModel } from '../lib/main';
 import ImageModel from '../lib/ImageModel';
 import SpeechModel from '../lib/SpeechModel';
+import PoseModel from '../lib/PoseModel';
 
 describe('Can create a new classifier', () => {
     it('can create a new image classifier', { timeout: 10000 }, async ({ expect }) => {
@@ -13,6 +14,19 @@ describe('Can create a new classifier', () => {
         expect(classifier.isReady()).toBe(true);
         expect(classifier.getModel()).toBeTruthy();
         expect(classifier.getImageSize()).toBe(224);
+
+        classifier.dispose();
+    });
+
+    it('can create a new pose classifier', { timeout: 10000 }, async ({ expect }) => {
+        const classifier = createModel('pose');
+        expect(classifier).toBeInstanceOf(PoseModel);
+
+        await classifier.ready();
+
+        expect(classifier.isReady()).toBe(true);
+        expect(classifier.getModel()).toBeTruthy();
+        expect(classifier.getImageSize()).toBe(257);
 
         classifier.dispose();
     });

@@ -135,6 +135,11 @@ function isPowerOfTwo(n: number): boolean {
     return Number.isInteger(n) && n > 0 && (n & (n - 1)) === 0;
 }
 
+interface PendingAudioExample {
+    example: AudioExample;
+    endTimeMillis: number;
+}
+
 export default class SoundRecorder extends EE<SoundRecorderEvents> {
     public canvas: HTMLCanvasElement | null = null;
 
@@ -157,12 +162,129 @@ export default class SoundRecorder extends EE<SoundRecorderEvents> {
     private lastEmitTime = 0;
     private startTime = 0;
 
-    private finish(err?: unknown) {
+    private includeRawAudioCapture = false;
+    private mediaRecorder: MediaRecorder | null = null;
+    private sourceAudioBlob: Blob | null = null;
+    private pendingExamples: PendingAudioExample[] = [];
+    private isFinishing = false;
+
+    private async startRawAudioCapture(options: RecordExampleOptions, blob?: Blob): Promise<void> {
+        this.includeRawAudioCapture = !!options.includeRawAudio;
+        if (!this.includeRawAudioCapture) return;
+
+        this.pendingExamples = [];
+
+        if (blob) {
+            // File-input mode: decode the original source blob later.
+            this.sourceAudioBlob = blob;
+            return;
+        }
+
+        if (!this.stream) {
+            throw new Error('Raw audio capture requested, but no input stream is available.');
+        }
+
+        if (typeof MediaRecorder === 'undefined') {
+            throw new Error('Raw audio capture requested, but MediaRecorder is not supported in this browser.');
+        }
+
+        this.mediaRecorder = new MediaRecorder(this.stream);
+
+        this.mediaRecorder.addEventListener('dataavailable', (event: BlobEvent) => {
+            if (event.data && event.data.size > 0) {
+                this.sourceAudioBlob = event.data;
+            }
+        });
+
+        return new Promise((resolve) => {
+            const onStart = () => {
+                this.mediaRecorder?.removeEventListener('start', onStart);
+                resolve();
+            };
+
+            this.mediaRecorder?.addEventListener('start', onStart, { once: true });
+            this.mediaRecorder?.start();
+        });
+    }
+
+    private async stopRawAudioCapture(): Promise<Blob | null> {
+        if (!this.includeRawAudioCapture) return null;
+
+        if (!this.mediaRecorder) {
+            return this.sourceAudioBlob;
+        }
+
+        const recorder = this.mediaRecorder;
+
+        if (recorder.state === 'inactive') {
+            return this.sourceAudioBlob;
+        }
+
+        const blob = await new Promise<Blob | null>((resolve) => {
+            const onStop = () => {
+                recorder.removeEventListener('stop', onStop);
+                recorder.removeEventListener('error', onError);
+                resolve(this.sourceAudioBlob);
+            };
+            const onError = () => {
+                recorder.removeEventListener('stop', onStop);
+                recorder.removeEventListener('error', onError);
+                resolve(this.sourceAudioBlob);
+            };
+
+            recorder.addEventListener('stop', onStop, { once: true });
+            recorder.addEventListener('error', onError, { once: true });
+            recorder.stop();
+        });
+
+        return blob;
+    }
+
+    private async decodeBlobToMonoPcm(blob: Blob, sampleRateHz: number): Promise<Float32Array> {
+        const audioData = await blob.arrayBuffer();
+        const decodeContext = new AudioContext({ sampleRate: sampleRateHz });
+        try {
+            const audioBuffer = await decodeContext.decodeAudioData(audioData.slice(0));
+            return new Float32Array(audioBuffer.getChannelData(0));
+        } finally {
+            await decodeContext.close();
+        }
+    }
+
+    private sliceRawAudioAndPatchExamples(fullPcm: Float32Array, sampleRateHz: number): void {
+        for (const pending of this.pendingExamples) {
+            const endSample = Math.min(fullPcm.length, Math.round((pending.endTimeMillis / 1000) * sampleRateHz));
+            const startSample = Math.max(0, endSample - sampleRateHz);
+            pending.example.rawAudio = {
+                data: fullPcm.slice(startSample, endSample),
+                sampleRateHz,
+            };
+        }
+
+        this.pendingExamples.length = 0;
+    }
+
+    private async finish(err?: unknown) {
         if (!this.isRecording) return;
+        if (this.isFinishing) return;
+        this.isFinishing = true;
 
         if (this.frameIntervalTask != null) {
             clearInterval(this.frameIntervalTask);
             this.frameIntervalTask = null;
+        }
+
+        try {
+            if (this.includeRawAudioCapture) {
+                const blob = await this.stopRawAudioCapture();
+                if (blob) {
+                    const sampleRateHz = this.currentSampleRateHz || 16000;
+                    const pcm = await this.decodeBlobToMonoPcm(blob, sampleRateHz);
+                    this.sliceRawAudioAndPatchExamples(pcm, sampleRateHz);
+                }
+            }
+        } catch (err) {
+            console.error(err);
         }
 
         try {
@@ -207,7 +329,8 @@ export default class SoundRecorder extends EE<SoundRecorderEvents> {
         freqData: Float32Array[],
         frameDurationMillis: number,
         word: string,
-        options: RecordExampleOptions
+        options: RecordExampleOptions,
+        elapsedTimeMillis: number
     ) {
         //const freqFrames = currentExampleFreq.splice(0, framesPerExample);
         const specData = flattenFrames(freqData, options.columnTruncateLength ?? options.frameSize);
@@ -254,14 +377,12 @@ export default class SoundRecorder extends EE<SoundRecorderEvents> {
             spectrogramCanvas: exampleCanvas,
         };
 
-        /*if (includeRawAudio) {
-                        const timeFrames = currentExampleTime.splice(0, framesPerExample);
-                        example.rawAudio = {
-                            data: flattenFrames(timeFrames, options.frameSize),
-                            sampleRateHz: actualSampleRateHz,
-                        };
-                    }*/
-
+        if (this.includeRawAudioCapture) {
+            this.pendingExamples.push({
+                example,
+                endTimeMillis: elapsedTimeMillis,
+            });
+        }
         this.emit('example', example);
     }
 
@@ -354,6 +475,8 @@ export default class SoundRecorder extends EE<SoundRecorderEvents> {
                 throw new Error('Failed to create AudioContext.');
             }
 
+            await this.startRawAudioCapture(options, blob);
+
             const actualSampleRateHz = this.audioContext.sampleRate;
             this.currentSampleRateHz = actualSampleRateHz;
             const frameDurationMillis = (options.frameSize / actualSampleRateHz) * 1e3;
@@ -368,10 +491,8 @@ export default class SoundRecorder extends EE<SoundRecorderEvents> {
             this.startTime = now;
 
             const freqScratch = new Float32Array(options.frameSize);
-            //const timeScratch = new Float32Array(this.analyser.fftSize);
 
             const currentExampleFreq: Float32Array[] = [];
-            //const currentExampleTime: Float32Array[] = [];
 
             this.emit('start');
 
@@ -414,16 +535,8 @@ export default class SoundRecorder extends EE<SoundRecorderEvents> {
                     if (inWarmup) {
                         // Keep visualization flowing, but discard example accumulation.
                         currentExampleFreq.length = 0;
-                        /*if (includeRawAudio) {
-                            currentExampleTime.length = 0;
-                        }*/
                     } else {
                         currentExampleFreq.push(freqFrame);
-
-                        /*if (includeRawAudio) {
-                            this.analyser.getFloatTimeDomainData(timeScratch);
-                            currentExampleTime.push(timeScratch.slice(timeScratch.length - options.frameSize));
-                        }*/
 
                         // Keep it at a constant length
                         if (currentExampleFreq.length > framesPerExample) {
@@ -432,7 +545,13 @@ export default class SoundRecorder extends EE<SoundRecorderEvents> {
 
                         if (shouldEmit) {
                             this.lastEmitTime = now;
-                            this.emitOneSecondExample(currentExampleFreq, frameDurationMillis, word, options);
+                            this.emitOneSecondExample(
+                                currentExampleFreq,
+                                frameDurationMillis,
+                                word,
+                                options,
+                                now - this.startTime
+                            );
                         }
                     }
                 } catch (err) {
