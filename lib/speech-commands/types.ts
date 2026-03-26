@@ -539,7 +539,7 @@ export interface TransferLearnConfig extends AudioDataAugmentationOptions {
     /**
      * Number of training epochs (default: 20).
      */
-    epochs?: number;
+    epochs: number;
 
     /**
      * Optimizer to be used for training (default: 'sgd').
@@ -549,7 +549,7 @@ export interface TransferLearnConfig extends AudioDataAugmentationOptions {
     /**
      * Batch size of training (default: 128).
      */
-    batchSize?: number;
+    batchSize: number;
 
     /**
      * Validation split to be used during training.

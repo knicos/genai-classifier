@@ -309,13 +309,7 @@ export class BrowserFftSpeechCommandRecognizer implements SpeechCommandRecognize
             model = await tfl.loadLayersModel(this.modelArtifactsOrURL);
         } else {
             // this.modelArtifactsOrURL is an instance of `tf.io.ModelArtifacts`.
-            model = await tfl.loadLayersModel(
-                tf.io.fromMemory(
-                    this.modelArtifactsOrURL.modelTopology ?? {},
-                    this.modelArtifactsOrURL.weightSpecs,
-                    this.modelArtifactsOrURL.weightData
-                )
-            );
+            model = await tfl.loadLayersModel(tf.io.fromMemory(this.modelArtifactsOrURL));
         }
 
         // Check the validity of the model's input shape.
@@ -1057,7 +1051,10 @@ class TransferBrowserFftSpeechCommandRecognizer
         }
 
         if (config == null) {
-            config = {};
+            config = {
+                epochs: 20,
+                batchSize: 128,
+            };
         }
 
         if (this.model == null) {

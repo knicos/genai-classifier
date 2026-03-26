@@ -1,15 +1,20 @@
 import * as tf from '@tensorflow/tfjs';
 import { ExplainedPredictionsOutput, TMType, TeachableModel } from './TeachableModel';
-import TeachableSpeechCommands, {
-    SoundTrainingParams,
-    TeachableSpeechCommandsMetadata,
-} from './speech-commands/TeachableSpeechCommands';
 import { AudioExample } from './gtm-utils/recorder';
+import {
+    create,
+    SpeechCommandRecognizer,
+    SpeechCommandRecognizerMetadata,
+    TransferLearnConfig,
+    TransferSpeechCommandRecognizer,
+} from './speech-commands';
 
 const NULLARRAY: string[] = [];
 
 export default class SpeechModel implements TeachableModel {
-    protected model?: TeachableSpeechCommands;
+    private recognizer?: SpeechCommandRecognizer;
+    private transferRecognizer?: TransferSpeechCommandRecognizer;
+    private metadata: SpeechCommandRecognizerMetadata;
     protected _ready?: Promise<boolean>;
     protected trained = false;
     protected busy = false;
@@ -19,34 +24,81 @@ export default class SpeechModel implements TeachableModel {
     public explained?: HTMLCanvasElement;
     modelBaseUrl = 'https://tmstore.blob.core.windows.net/models';
 
-    constructor(type: TMType) {
+    constructor(
+        type: TMType,
+        metadata?: SpeechCommandRecognizerMetadata,
+        model?: tf.io.ModelJSON,
+        weights?: ArrayBuffer
+    ) {
         if (type !== 'speech') {
             throw new Error(`Invalid type for SpeechModel: ${type}`);
         }
-        this._ready = this.load().then(() => true);
-        console.log('SpeechModel initialized');
+
+        this.metadata = metadata || {
+            wordLabels: [],
+            tfjsSpeechCommandsVersion: '0.4.0',
+        };
+
+        this._ready = this.load(metadata, model, weights).then(() => true);
+    }
+
+    getModel() {
+        return this.transferRecognizer ? this.transferRecognizer : this.recognizer;
+    }
+
+    getVariant(): TMType {
+        return this.variant;
     }
 
     public setXAICanvas() {
-        if (this.model) {
-            return;
-        }
-        throw new Error('no_model');
+        return;
     }
 
     public setXAIClass() {}
 
-    protected async load(metadata?: TeachableSpeechCommandsMetadata, model?: tf.io.ModelJSON, weights?: ArrayBuffer) {
+    protected async load(metadata?: SpeechCommandRecognizerMetadata, model?: tf.io.ModelJSON, weights?: ArrayBuffer) {
         await tf.ready();
-        if (metadata && model && weights) {
-            // TODO
-        } else {
-            this.model = new TeachableSpeechCommands(metadata || {});
-            console.log('Loading model...', this.model);
-            await this.model.ready;
+        try {
+            this.recognizer = create(
+                'BROWSER_FFT',
+                undefined,
+                model
+                    ? {
+                          modelTopology: model.modelTopology,
+                          weightData: weights,
+                          weightSpecs: model.weightsManifest[0].weights,
+                      }
+                    : undefined,
+                model ? metadata : undefined
+            );
+            await this.recognizer
+                .ensureModelLoaded()
+                .then(() => {
+                    this.transferRecognizer = model ? undefined : this.recognizer?.createTransfer('my-transfer-model');
+                })
+                .then(() => true)
+                .catch((err: unknown) => {
+                    console.error('Error loading model:', err);
+                    return false;
+                });
+            this.trained = !!model;
+        } catch (err) {
+            console.error('Error loading custom model:', err);
+            throw err;
         }
 
         this.imageSize = 0;
+    }
+
+    public getRecognizerModel() {
+        return this.transferRecognizer ? this.transferRecognizer : this.recognizer;
+    }
+
+    public countExamples() {
+        if (this.transferRecognizer) {
+            return this.transferRecognizer.countExamples();
+        }
+        return {};
     }
 
     public async ready() {
@@ -57,8 +109,8 @@ export default class SpeechModel implements TeachableModel {
         if (!this.trained) {
             throw new Error('Model is not trained yet.');
         }
-        await this.model?.transferRecognizer?.ensureModelLoaded();
-        const result = await this.model?.transferRecognizer?.recognize(input.spectrogram.data);
+        await this.getRecognizerModel()?.ensureModelLoaded();
+        const result = await this.getRecognizerModel()?.recognize(input.spectrogram.data);
         if (result) {
             const labels = this.getLabels();
             const predictions: ExplainedPredictionsOutput = {
@@ -72,13 +124,17 @@ export default class SpeechModel implements TeachableModel {
         return { predictions: [] };
     }
 
-    public async train(params: SoundTrainingParams, callbacks: tf.CustomCallbackArgs) {
+    public async train(params: TransferLearnConfig, callbacks: tf.CustomCallbackArgs) {
         this.trained = false;
-        if (this.model) {
-            return this.model.train(params, callbacks).then((m) => {
-                this.trained = true;
-                return m;
+        if (this.transferRecognizer) {
+            await this.transferRecognizer.train({
+                epochs: params.epochs,
+                batchSize: params.batchSize,
+                callback: callbacks,
             });
+
+            this.trained = true;
+            return;
         }
         throw new Error('no_model');
     }
@@ -92,26 +148,24 @@ export default class SpeechModel implements TeachableModel {
     }
 
     public async addExample(_: number, example: AudioExample) {
-        if (this.model) {
-            return this.model.addExample(example.label, example);
+        if (this.transferRecognizer) {
+            return this.transferRecognizer.addExample(example);
         }
         throw new Error('no_model');
     }
 
     public dispose() {
         this._disposed = true;
-
-        this.model?.transferRecognizer?.dispose();
-
-        this.model = undefined;
+        if (this.transferRecognizer) {
+            this.transferRecognizer.dispose();
+        }
+        if (this.recognizer) {
+            this.recognizer.dispose();
+        }
     }
 
     public setName(): void {
         // TODO
-    }
-
-    public getModel(): TeachableSpeechCommands | undefined {
-        return this.model;
     }
 
     public getImageSize() {
@@ -123,7 +177,7 @@ export default class SpeechModel implements TeachableModel {
     }
 
     public isReady() {
-        return !!this.model;
+        return !!this.getRecognizerModel();
     }
 
     public setSeed() {
@@ -131,15 +185,13 @@ export default class SpeechModel implements TeachableModel {
     }
 
     public getMetadata() {
-        if (this.model) {
-            return this.model.getMetadata();
-        }
+        this.metadata.wordLabels = this.getRecognizerModel()?.wordLabels() || [];
+        return this.metadata;
     }
 
-    public async save() {
-        if (this.model) {
-            //return this.model.save(handler);
-            return undefined;
+    public async save(handler: tf.io.IOHandler) {
+        if (this.transferRecognizer) {
+            return this.transferRecognizer.save(handler);
         }
         throw new Error('no_model');
     }
@@ -149,45 +201,39 @@ export default class SpeechModel implements TeachableModel {
     }
 
     public getLabels(): string[] {
-        if (this.model && this.model.transferRecognizer) {
-            return this.model.transferRecognizer.wordLabels();
-        }
-        return NULLARRAY;
+        return this.getRecognizerModel()?.wordLabels() || NULLARRAY;
     }
 
     public getLabel(ix: number): string {
-        if (this.model && this.model.transferRecognizer) {
-            return this.model.transferRecognizer.wordLabels()[ix] || '';
-        }
-        return '';
+        return this.getRecognizerModel()?.wordLabels()[ix] || '';
     }
 
     public getNumExamples(): number {
-        if (this.model && this.model.transferRecognizer) {
-            const counts = this.model.transferRecognizer.countExamples();
+        if (this.transferRecognizer) {
+            const counts = this.transferRecognizer.countExamples();
             return Object.values(counts).reduce((a, b) => a + b, 0);
         }
         return 0;
     }
 
     public getExamplesPerClass(): number[] {
-        if (this.model && this.model.transferRecognizer) {
-            const counts = this.model.transferRecognizer.countExamples();
-            return this.model.transferRecognizer.wordLabels().map((label) => counts[label] || 0);
+        if (this.transferRecognizer) {
+            const counts = this.transferRecognizer.countExamples();
+            return this.transferRecognizer.wordLabels().map((label) => counts[label] || 0);
         }
         return [];
     }
 
     public getNumValidation(): number {
-        if (this.model && this.model.transferRecognizer) {
-            const counts = this.model.transferRecognizer.countExamples();
+        if (this.transferRecognizer) {
+            const counts = this.transferRecognizer.countExamples();
             return Object.values(counts).reduce((t, e) => t + Math.ceil(e * 0.15), 0);
         }
         return 0;
     }
 
     public async calculateAccuracy() {
-        if (this.model) {
+        if (this.transferRecognizer) {
             return { reference: null, predictions: tf.tensor([]) };
         } else {
             throw new Error('no_model');

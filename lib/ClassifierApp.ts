@@ -61,7 +61,7 @@ export function createModel(
         case 'pose':
             return new PoseModel(variant, metadata, model, weights);
         case 'speech':
-            return new SoundModel(variant);
+            return new SoundModel(variant, metadata, model, weights);
         case 'hand':
             return new HandModel(variant, metadata, model, weights);
         default:
@@ -333,8 +333,15 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
 
             const parsedModel = JSON.parse(project.modelJson) as tf.io.ModelJSON;
 
-            const model = createModel('image', meta, parsedModel, project.modelWeights);
-            await model.ready();
+            let type: TMType = 'image';
+            if ('tfjsSpeechCommandsVersion' in meta) {
+                type = 'speech';
+            } else if ('poseNetArchitecture' in meta) {
+                type = 'pose';
+            }
+
+            //const model = createModel(type, meta, parsedModel, project.modelWeights);
+            //await model.ready();
 
             const samplePromises: Promise<HTMLCanvasElement>[] = [];
 
@@ -372,12 +379,12 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
                 samples.push(newImage.map((i) => ({ data: i, id: '' })));
             }
 
-            const tm = createModel('image', meta, parsedModel, project.modelWeights);
+            const tm = createModel(type, meta, parsedModel, project.modelWeights);
 
             await tm.ready();
 
             const app = new ClassifierApp(
-                'image',
+                type,
                 tm,
                 project.behaviours ? JSON.parse(project.behaviours).behaviours : [],
                 samples

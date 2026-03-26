@@ -52,6 +52,10 @@ export default class HandModel implements TeachableModel {
         });
     }
 
+    public getVariant(): TMType {
+        return this.variant;
+    }
+
     public setXAICanvas(canvas: HTMLCanvasElement) {
         if (this.model) {
             this.explained = canvas;

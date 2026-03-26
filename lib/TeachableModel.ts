@@ -6,10 +6,7 @@ import { TeachableHandPose, Metadata as HandMetadata } from './gtm-hand';
 import { TrainingParameters as HandTrainingParams } from './gtm-hand/teachable-handpose';
 import * as tf from '@tensorflow/tfjs';
 import { AudioExample } from './gtm-utils/recorder';
-import TeachableSpeechCommands, {
-    SoundTrainingParams,
-    TeachableSpeechCommandsMetadata,
-} from './speech-commands/TeachableSpeechCommands';
+import { SpeechCommandRecognizer, SpeechCommandRecognizerMetadata, TransferLearnConfig } from './speech-commands';
 
 export type TMType = 'image' | 'pose' | 'speech' | 'hand' | 'text';
 
@@ -24,18 +21,22 @@ export interface ExplainedPredictionsOutput {
     heatmap?: number[][];
 }
 
-interface TrainingParameters extends ImageTrainingParams, PoseTrainingParams, HandTrainingParams, SoundTrainingParams {}
+interface TrainingParameters extends ImageTrainingParams, PoseTrainingParams, HandTrainingParams, TransferLearnConfig {}
 
 interface BaseMetadata {
     modelBaseUrl?: string;
 }
 
-export type Metadata = BaseMetadata & (ImageMetadata | PoseMetadata | HandMetadata | TeachableSpeechCommandsMetadata);
+export type Metadata = BaseMetadata & (ImageMetadata | PoseMetadata | HandMetadata | SpeechCommandRecognizerMetadata);
 
 export interface TeachableModel {
     readonly variant: TMType;
     explained?: HTMLCanvasElement;
     readonly modelBaseUrl: string;
+
+    // constructor(type: TMType, metadata?: Metadata, model?: tf.io.ModelJSON, weights?: ArrayBuffer);
+
+    getVariant(): TMType;
 
     setXAICanvas(canvas: HTMLCanvasElement): void;
 
@@ -43,7 +44,7 @@ export interface TeachableModel {
 
     setName(name: string): void;
 
-    getModel(): TeachableMobileNet | TeachablePoseNet | TeachableHandPose | TeachableSpeechCommands | undefined;
+    getModel(): TeachableMobileNet | TeachablePoseNet | TeachableHandPose | SpeechCommandRecognizer | undefined;
 
     getImageSize(): number;
 

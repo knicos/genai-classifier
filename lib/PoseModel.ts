@@ -44,7 +44,7 @@ export default class PoseModel implements TeachableModel {
     protected busy = false;
     protected imageSize = 224;
     protected _disposed = false;
-    public variant: TMType = 'image';
+    public variant: TMType = 'pose';
     public explained?: HTMLCanvasElement;
     modelBaseUrl = 'https://tmstore.blob.core.windows.net/models';
     private lastPose?: Pose;
@@ -65,6 +65,10 @@ export default class PoseModel implements TeachableModel {
                 resolve(true);
             });
         });
+    }
+
+    getVariant(): TMType {
+        return this.variant;
     }
 
     public setXAICanvas(canvas: HTMLCanvasElement) {

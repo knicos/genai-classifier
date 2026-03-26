@@ -50,6 +50,10 @@ export default class ImageModel implements TeachableModel {
         });
     }
 
+    getVariant(): TMType {
+        return this.variant;
+    }
+
     public async estimate(image: HTMLCanvasElement): Promise<HTMLCanvasElement> {
         return image;
     }
