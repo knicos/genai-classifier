@@ -9,7 +9,7 @@ const WINDOW_BLOCK_Y = 2;
 const ENABLE_WINDOWED_RENDER = true;
 
 // Visual frequency-range controls (rendering only).
-const ENABLE_VOCAL_BAND_LIMIT = true;
+const ENABLE_VOCAL_BAND_LIMIT = false;
 const VOCAL_MIN_HZ = 80;
 const VOCAL_MAX_HZ = 4000;
 

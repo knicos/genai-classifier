@@ -141,8 +141,9 @@ export default class SoundRecorder extends EE<SoundRecorderEvents> {
     private stream: MediaStream | null = null;
     private audioContext: AudioContext | null = null;
     private analyser: AnalyserNode | null = null;
-    private source: MediaStreamAudioSourceNode | null = null;
+    private source: MediaStreamAudioSourceNode | MediaElementAudioSourceNode | null = null;
     private frameIntervalTask: number | null = null;
+    private audioElement: HTMLAudioElement | null = null;
 
     private isRecording = false;
     private stopRequested = false;
@@ -171,6 +172,12 @@ export default class SoundRecorder extends EE<SoundRecorderEvents> {
             this.source = null;
         } catch {
             // Ignore any error during disconnection/cleanup.
+        }
+
+        if (this.audioElement) {
+            this.audioElement.pause();
+            URL.revokeObjectURL(this.audioElement.src);
+            this.audioElement = null;
         }
 
         if (this.stream) {
@@ -258,7 +265,40 @@ export default class SoundRecorder extends EE<SoundRecorderEvents> {
         this.emit('example', example);
     }
 
-    async startRecording(word: string, options: RecordExampleOptions): Promise<void> {
+    private createFromStream(stream: MediaStream, options: RecordExampleOptions) {
+        this.stream = stream;
+        this.audioContext = new AudioContext({ sampleRate: options.sampleRateHz });
+        this.source = this.audioContext.createMediaStreamSource(stream);
+        this.analyser = this.audioContext.createAnalyser();
+        this.analyser.fftSize = options.frameSize * 2;
+        this.analyser.smoothingTimeConstant = 0;
+        this.source.connect(this.analyser);
+    }
+
+    private createFromBlob(blob: Blob, options: RecordExampleOptions) {
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.crossOrigin = 'anonymous';
+        this.audioContext = new AudioContext({ sampleRate: options.sampleRateHz });
+        this.source = this.audioContext.createMediaElementSource(audio);
+        this.analyser = this.audioContext.createAnalyser();
+        this.analyser.fftSize = options.frameSize * 2;
+        this.analyser.smoothingTimeConstant = 0;
+        this.source.connect(this.analyser);
+        this.analyser.connect(this.audioContext.destination);
+
+        audio.addEventListener('error', () => {
+            this.stopRequested = true;
+        });
+        audio.addEventListener('ended', () => {
+            this.stopRequested = true;
+        });
+
+        audio.play();
+        this.audioElement = audio;
+    }
+
+    async startRecording(word: string, options: RecordExampleOptions, blob?: Blob): Promise<void> {
         if (this.isRecording) {
             throw new Error('SoundRecorder is already recording.');
         }
@@ -297,20 +337,22 @@ export default class SoundRecorder extends EE<SoundRecorderEvents> {
         }
 
         try {
-            this.stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    channelCount: 1,
-                    sampleRate: options.sampleRateHz,
-                },
-                video: false,
-            });
-            this.audioContext = new AudioContext({ sampleRate: options.sampleRateHz });
-            this.source = this.audioContext.createMediaStreamSource(this.stream);
-            this.analyser = this.audioContext.createAnalyser();
-
-            this.analyser.fftSize = options.frameSize * 2;
-            this.analyser.smoothingTimeConstant = 0;
-            this.source.connect(this.analyser);
+            if (blob) {
+                console.log('Creating sound recorder from provided audio blob');
+                this.createFromBlob(blob, options);
+            } else {
+                this.stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        sampleRate: options.sampleRateHz,
+                    },
+                    video: false,
+                });
+                this.createFromStream(this.stream, options);
+            }
+            if (!this.audioContext) {
+                throw new Error('Failed to create AudioContext.');
+            }
 
             const actualSampleRateHz = this.audioContext.sampleRate;
             this.currentSampleRateHz = actualSampleRateHz;
