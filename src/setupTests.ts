@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import 'vitest-canvas-mock';
 
 Object.defineProperty(window, 'matchMedia', {
     writable: true,

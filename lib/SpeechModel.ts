@@ -23,6 +23,7 @@ export default class SpeechModel implements TeachableModel {
     public variant: TMType = 'speech';
     public explained?: HTMLCanvasElement;
     modelBaseUrl = 'https://tmstore.blob.core.windows.net/models';
+    private labels: string[] = [];
 
     constructor(
         type: TMType,
@@ -147,7 +148,8 @@ export default class SpeechModel implements TeachableModel {
         return image;
     }
 
-    public async addExample(_: number, example: AudioExample) {
+    public async addExample(label: number, example: AudioExample) {
+        example.label = this.labels[label];
         if (this.transferRecognizer) {
             return this.transferRecognizer.addExample(example);
         }
@@ -196,8 +198,8 @@ export default class SpeechModel implements TeachableModel {
         throw new Error('no_model');
     }
 
-    public setLabels() {
-        // Not needed.
+    public setLabels(labels: string[]) {
+        this.labels = labels;
     }
 
     public getLabels(): string[] {
