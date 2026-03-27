@@ -47,6 +47,21 @@ export interface PredictionsOutput extends ExplainedPredictionsOutput {
     failed?: boolean;
 }
 
+interface AudioDataJSON {
+    label: string;
+    frameSize: number;
+    sampleRateHz?: number;
+    keyFrameIndex?: number;
+    frameDurationMillis?: number;
+}
+
+interface LoadedSampleFiles {
+    pngBase64?: string;
+    audioMeta?: AudioDataJSON;
+    spectrogramBuffer?: ArrayBuffer;
+    pcmBuffer?: ArrayBuffer;
+}
+
 type ClassifierAppEvents = 'loading' | 'ready' | 'epoch' | 'training' | 'trainingcomplete' | 'error' | 'action';
 
 export function createModel(
@@ -213,6 +228,34 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
                             folder.file(`${j}_${i}.png`, ss.data.toDataURL('image/png').split(';base64,')[1], {
                                 base64: true,
                             });
+                        } else {
+                            if (ss.data.spectrogramCanvas) {
+                                folder.file(
+                                    `${j}_${i}.png`,
+                                    ss.data.spectrogramCanvas.toDataURL('image/png').split(';base64,')[1],
+                                    {
+                                        base64: true,
+                                    }
+                                );
+                            }
+                            if (ss.data.rawAudio) {
+                                const f32 = ss.data.rawAudio.data;
+                                const bytes = new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength);
+                                folder.file(`${j}_${i}.pcm`, bytes, { binary: true });
+                            }
+
+                            const f32 = ss.data.spectrogram.data;
+                            const bytes = new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength);
+                            folder.file(`${j}_${i}.spectrogram`, bytes, { binary: true });
+
+                            const meta: AudioDataJSON = {
+                                label: ss.data.label,
+                                frameSize: ss.data.spectrogram.frameSize,
+                                sampleRateHz: ss.data.rawAudio?.sampleRateHz,
+                                keyFrameIndex: ss.data.spectrogram.keyFrameIndex,
+                                frameDurationMillis: ss.data.spectrogram.frameDurationMillis,
+                            };
+                            folder.file(`${j}_${i}.json`, JSON.stringify(meta));
                         }
                     }
                 }
@@ -274,6 +317,8 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
             samples: [],
         };
 
+        const sampleFiles = new Map<string, LoadedSampleFiles>();
+
         const blob = typeof file === 'string' ? await fetch(file).then((r) => r.blob()) : file;
 
         const zip = await JSZip.loadAsync(blob);
@@ -305,23 +350,38 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
                     })
                 );
             } else {
-                const parts = data.name.split('/');
-                if (parts.length === 2 && !!parts[1] && parts[0] === 'samples') {
-                    const split1 = parts[1].split('.');
-                    if (split1.length === 2) {
-                        const split2 = split1[0].split('_');
-                        if (split2.length === 2) {
-                            const ix1 = parseInt(split2[0]);
-                            const ix2 = parseInt(split2[1]);
-                            while (project.samples.length <= ix1) project.samples.push([]);
-                            while (project.samples[ix1].length <= ix2) project.samples[ix1].push('');
-                            promises.push(
-                                data.async('base64').then((r) => {
-                                    project.samples[ix1][ix2] = `data:image/png;base64,${r}`;
-                                })
-                            );
-                        }
-                    }
+                const m = data.name.match(/^samples\/(\d+)_(\d+)\.(png|json|spectrogram|pcm)$/);
+                if (!m) return;
+
+                const key = `${m[1]}_${m[2]}`;
+                const ext = m[3];
+                const entry = sampleFiles.get(key) ?? {};
+                sampleFiles.set(key, entry);
+
+                if (ext === 'png') {
+                    promises.push(
+                        data.async('base64').then((r) => {
+                            entry.pngBase64 = r;
+                        })
+                    );
+                } else if (ext === 'json') {
+                    promises.push(
+                        data.async('string').then((r) => {
+                            entry.audioMeta = JSON.parse(r) as AudioDataJSON;
+                        })
+                    );
+                } else if (ext === 'spectrogram') {
+                    promises.push(
+                        data.async('arraybuffer').then((r) => {
+                            entry.spectrogramBuffer = r;
+                        })
+                    );
+                } else if (ext === 'pcm') {
+                    promises.push(
+                        data.async('arraybuffer').then((r) => {
+                            entry.pcmBuffer = r;
+                        })
+                    );
                 }
             }
         });
@@ -340,43 +400,68 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
                 type = 'pose';
             }
 
-            //const model = createModel(type, meta, parsedModel, project.modelWeights);
-            //await model.ready();
+            const canvasFromBase64 = (base64: string) =>
+                new Promise<HTMLCanvasElement>((resolve) => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 224;
+                    canvas.height = 224;
+                    canvas.style.width = '58px';
+                    canvas.style.height = '58px';
+                    const ctx = canvas.getContext('2d');
+                    const img = new Image();
+                    img.onload = () => {
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        ctx?.drawImage(img, 0, 0);
+                        resolve(canvas);
+                    };
+                    img.src = `data:image/png;base64,${base64}`;
+                });
 
-            const samplePromises: Promise<HTMLCanvasElement>[] = [];
-
-            for (const item of project.samples) {
-                for (const s of item) {
-                    samplePromises.push(
-                        new Promise((resolve) => {
-                            const canvas = document.createElement('canvas');
-                            canvas.width = 224;
-                            canvas.height = 224;
-                            canvas.style.width = '58px';
-                            canvas.style.height = '58px';
-                            const ctx = canvas.getContext('2d');
-                            const img = new Image();
-                            img.onload = () => {
-                                ctx?.drawImage(img, 0, 0);
-                                resolve(canvas);
-                            };
-                            img.src = s;
-                        })
-                    );
-                }
-            }
-
-            const canvases = await Promise.all(samplePromises);
+            const parsedEntries = Array.from(sampleFiles.entries()).map(([key, files]) => {
+                const [jStr, iStr] = key.split('_');
+                return { j: Number(jStr), i: Number(iStr), files };
+            });
 
             const samples: ISample[][] = [];
 
-            let base = 0;
-            for (let i = 0; i < project.samples.length; ++i) {
-                const newImage: HTMLCanvasElement[] = [];
-                for (let j = 0; j < project.samples[i].length; ++j) {
-                    newImage.push(canvases[base++]);
+            for (const { j, i, files } of parsedEntries) {
+                while (samples.length <= j) samples.push([]);
+                while (samples[j].length <= i) samples[j].push({ data: document.createElement('canvas'), id: '' });
+
+                const isAudio = !!files.audioMeta && !!files.spectrogramBuffer;
+
+                if (isAudio) {
+                    const spectrogramData = new Float32Array(files.spectrogramBuffer!);
+
+                    const audioExample: AudioExample = {
+                        label: files.audioMeta!.label,
+                        spectrogram: {
+                            data: spectrogramData,
+                            frameSize: files.audioMeta!.frameSize,
+                            keyFrameIndex: files.audioMeta!.keyFrameIndex,
+                            frameDurationMillis: files.audioMeta!.frameDurationMillis,
+                        },
+                    };
+
+                    if (files.pngBase64) {
+                        audioExample.spectrogramCanvas = await canvasFromBase64(files.pngBase64);
+                    }
+
+                    if (files.pcmBuffer && files.audioMeta!.sampleRateHz) {
+                        audioExample.rawAudio = {
+                            data: new Float32Array(files.pcmBuffer),
+                            sampleRateHz: files.audioMeta!.sampleRateHz,
+                        };
+                    }
+
+                    samples[j][i] = { data: audioExample, id: '' };
+                } else if (files.pngBase64) {
+                    const canvas = await canvasFromBase64(files.pngBase64);
+                    samples[j][i] = { data: canvas, id: '' };
+                } else {
+                    throw new Error(`Sample ${j}_${i} has no recognizable payload`);
                 }
-                samples.push(newImage.map((i) => ({ data: i, id: '' })));
             }
 
             const tm = createModel(type, meta, parsedModel, project.modelWeights);
