@@ -36,17 +36,34 @@ const LINE_WIDTH = 2;
  */
 export const HAND_CONNECTIONS: [number, number][] = [
     // Thumb
-    [0, 1], [1, 2], [2, 3], [3, 4],
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [3, 4],
     // Index finger
-    [0, 5], [5, 6], [6, 7], [7, 8],
+    [0, 5],
+    [5, 6],
+    [6, 7],
+    [7, 8],
     // Middle finger
-    [0, 9], [9, 10], [10, 11], [11, 12],
+    [0, 9],
+    [9, 10],
+    [10, 11],
+    [11, 12],
     // Ring finger
-    [0, 13], [13, 14], [14, 15], [15, 16],
+    [0, 13],
+    [13, 14],
+    [14, 15],
+    [15, 16],
     // Pinky
-    [0, 17], [17, 18], [18, 19], [19, 20],
+    [0, 17],
+    [17, 18],
+    [18, 19],
+    [19, 20],
     // Palm cross-connections
-    [5, 9], [9, 13], [13, 17],
+    [5, 9],
+    [9, 13],
+    [13, 17],
 ];
 
 /**
@@ -82,11 +99,42 @@ export function drawHandKeypoints(
     keypointSize: number = KEYPOINT_SIZE,
     fillColor: string = FILL_COLOR,
     strokeColor: string = STROKE_COLOR,
-    scale = 1
+    scale = 1,
+    autoSize = true
 ) {
+    // Compute dynamic keypoint size based on hand bounding box when
+    // autoSize is enabled. Callers can still pass an explicit
+    // `keypointSize` and set `autoSize=false` to opt out.
+    let computedSize = keypointSize;
+    if (autoSize) {
+        let minX = Number.POSITIVE_INFINITY;
+        let minY = Number.POSITIVE_INFINITY;
+        let maxX = Number.NEGATIVE_INFINITY;
+        let maxY = Number.NEGATIVE_INFINITY;
+        let any = false;
+        for (const kp of keypoints) {
+            if (kp.score !== undefined && kp.score < minScore) continue;
+            any = true;
+            if (kp.x < minX) minX = kp.x;
+            if (kp.y < minY) minY = kp.y;
+            if (kp.x > maxX) maxX = kp.x;
+            if (kp.y > maxY) maxY = kp.y;
+        }
+
+        if (any) {
+            const handWidth = (maxX - minX) * scale;
+            const handHeight = (maxY - minY) * scale;
+            const handSize = Math.max(handWidth, handHeight);
+
+            // Radius proportional to hand size. Tweak factor as needed.
+            const proportional = Math.max(1, Math.round(handSize * 0.03));
+            computedSize = Math.max(1, Math.min(20, proportional));
+        }
+    }
+
     for (const kp of keypoints) {
         if (kp.score !== undefined && kp.score < minScore) continue;
-        drawHandPoint(ctx, kp.x * scale, kp.y * scale, keypointSize, fillColor, strokeColor);
+        drawHandPoint(ctx, kp.x * scale, kp.y * scale, computedSize, fillColor, strokeColor);
     }
 }
 
