@@ -104,6 +104,8 @@ export interface RecordExampleOptions {
     overlapFactor?: number;
 
     includeCanvas?: boolean;
+
+    deviceId?: string;
 }
 
 function flattenFrames(frames: Float32Array[], frameSize: number): Float32Array {
@@ -459,13 +461,13 @@ export default class SoundRecorder extends EE<SoundRecorderEvents> {
 
         try {
             if (blob) {
-                console.log('Creating sound recorder from provided audio blob');
                 this.createFromBlob(blob, options);
             } else {
                 this.stream = await navigator.mediaDevices.getUserMedia({
                     audio: {
                         channelCount: 1,
                         sampleRate: options.sampleRateHz,
+                        deviceId: options.deviceId,
                     },
                     video: false,
                 });
