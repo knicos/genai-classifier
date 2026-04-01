@@ -31,22 +31,21 @@ export default class ImageModel implements TeachableModel {
         if (type !== 'image') {
             throw new Error(`Invalid type for ImageModel: ${type}`);
         }
-        this._ready = new Promise((resolve) => {
-            if (metadata?.packageName) {
-                if (metadata.packageName !== '@teachablemachine/image') {
-                    throw new Error(`Invalid packageName for ImageModel: ${metadata.packageName}`);
-                }
+
+        if (metadata?.packageName) {
+            if (metadata.packageName !== '@teachablemachine/image') {
+                throw new Error(`Invalid packageName for ImageModel: ${metadata.packageName}`);
             }
+        }
 
-            this.variant = type;
+        this.variant = type;
 
-            if (metadata?.modelBaseUrl) {
-                this.modelBaseUrl = metadata.modelBaseUrl;
-            }
+        if (metadata?.modelBaseUrl) {
+            this.modelBaseUrl = metadata.modelBaseUrl;
+        }
 
-            this.load(metadata, model, weights).then(() => {
-                resolve(true);
-            });
+        this._ready = this.load(metadata, model, weights).then(() => {
+            return true;
         });
     }
 

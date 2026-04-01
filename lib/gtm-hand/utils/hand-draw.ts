@@ -17,8 +17,8 @@
 
 import type { Keypoint } from '@tensorflow-models/hand-pose-detection';
 
-const FILL_COLOR = 'aqua';
-const STROKE_COLOR = 'aqua';
+const FILL_COLOR = 'rgb(174, 37, 174)';
+const STROKE_COLOR = 'white';
 const KEYPOINT_SIZE = 4;
 const LINE_WIDTH = 2;
 

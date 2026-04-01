@@ -39,16 +39,14 @@ export default class HandModel implements TeachableModel {
             throw new Error(`Invalid type for HandModel: ${type}`);
         }
 
-        this._ready = new Promise((resolve) => {
-            this.variant = type;
+        this.variant = type;
 
-            if (metadata?.modelBaseUrl) {
-                this.modelBaseUrl = metadata.modelBaseUrl;
-            }
+        if (metadata?.modelBaseUrl) {
+            this.modelBaseUrl = metadata.modelBaseUrl;
+        }
 
-            this.load(metadata, model, weights).then(() => {
-                resolve(true);
-            });
+        this._ready = this.load(metadata, model, weights).then(() => {
+            return true;
         });
     }
 

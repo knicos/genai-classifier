@@ -54,16 +54,15 @@ export default class PoseModel implements TeachableModel {
         if (type !== 'pose') {
             throw new Error(`Invalid type for PoseModel: ${type}`);
         }
-        this._ready = new Promise((resolve) => {
-            this.variant = type;
 
-            if (metadata?.modelBaseUrl) {
-                this.modelBaseUrl = metadata.modelBaseUrl;
-            }
+        this.variant = type;
 
-            this.load(metadata, model, weights).then(() => {
-                resolve(true);
-            });
+        if (metadata?.modelBaseUrl) {
+            this.modelBaseUrl = metadata.modelBaseUrl;
+        }
+
+        this._ready = this.load(metadata, model, weights).then(() => {
+            return true;
         });
     }
 
