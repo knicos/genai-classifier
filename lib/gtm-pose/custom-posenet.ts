@@ -68,7 +68,7 @@ const fillMetadata = (data: Partial<Metadata>) => {
     return data as Metadata;
 };
 // tslint:disable-next-line:no-any
- 
+
 const isMetadata = (c: any): c is Metadata => !!c && Array.isArray(c.labels);
 
 /**
@@ -149,7 +149,11 @@ export class CustomPoseNet {
         return this._metadata;
     }
 
-    constructor(public model: tf.LayersModel, public posenetModel: posenet.PoseNet, metadata: Partial<Metadata>) {
+    constructor(
+        public model: tf.LayersModel,
+        public posenetModel: posenet.PoseNet,
+        metadata: Partial<Metadata>
+    ) {
         this._metadata = fillMetadata(metadata);
     }
 
@@ -170,11 +174,10 @@ export class CustomPoseNet {
     }
 
     public async estimatePose(sample: PosenetInput, flipHorizontal = false) {
-        const { heatmapScores, offsets, displacementFwd, displacementBwd, padding } = await this.estimatePoseOutputs(
-            sample
-        );
+        const { heatmapScores, offsets, displacementFwd, displacementBwd, padding } =
+            await this.estimatePoseOutputs(sample);
 
-        const posenetOutput = this.poseOutputsToAray(heatmapScores, offsets);
+        const posenetOutput = await this.poseOutputsToAray(heatmapScores, offsets);
 
         const pose = await this.poseOutputsToKeypoints(
             sample,
@@ -196,16 +199,15 @@ export class CustomPoseNet {
 
         const { resized, padding } = padAndResizeTo(sample, inputResolution);
 
-        const { heatmapScores, offsets, displacementFwd, displacementBwd } = await this.posenetModel.baseModel.predict(
-            resized
-        );
+        const { heatmapScores, offsets, displacementFwd, displacementBwd } =
+            await this.posenetModel.baseModel.predict(resized);
 
         resized.dispose();
 
         return { heatmapScores, offsets, displacementFwd, displacementBwd, padding };
     }
 
-    public poseOutputsToAray(
+    public async poseOutputsToAray(
         heatmapScores: tf.Tensor3D,
         offsets: tf.Tensor3D
         // displacementFwd: tf.Tensor3D,
@@ -213,7 +215,7 @@ export class CustomPoseNet {
     ) {
         const axis = 2;
         const concat = tf.concat([heatmapScores, offsets], axis);
-        const concatArray = concat.dataSync() as Float32Array;
+        const concatArray = (await concat.data()) as Float32Array;
 
         concat.dispose();
 

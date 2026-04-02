@@ -266,7 +266,7 @@ export default class PoseModel implements TeachableModel {
     public async addExample(className: number, image: HTMLCanvasElement) {
         if (this.model) {
             const { heatmapScores, offsets } = await this.model.estimatePoseOutputs(image);
-            const posenetOutput = this.model.poseOutputsToAray(heatmapScores, offsets);
+            const posenetOutput = await this.model.poseOutputsToAray(heatmapScores, offsets);
             return this.model.addExample(className, posenetOutput);
         }
     }

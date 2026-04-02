@@ -45,7 +45,7 @@ interface Sample {
 }
 
 // tslint:disable-next-line:no-any
- 
+
 const isTensor = (c: any): c is tf.Tensor => typeof c.dataId === 'object' && typeof c.shape === 'object';
 
 /**
@@ -149,7 +149,7 @@ export class TeachableMobileNet extends CustomMobileNet {
         const cap = isTensor(sample) ? sample : capture(sample, this._metadata.grayscale);
         const example = this.truncatedModel.predict(cap) as tf.Tensor;
 
-        const activation = example.dataSync() as Float32Array;
+        const activation = (await example.data()) as Float32Array;
         cap.dispose();
         example.dispose();
 
