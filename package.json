@@ -44,6 +44,7 @@
         "vitest-canvas-mock": "^1.1.4"
     },
     "dependencies": {
+        "@mediapipe/hands": "^0.4.1675469240",
         "@tensorflow-models/hand-pose-detection": "^2.0.1",
         "@tensorflow/tfjs": "^4.22.0",
         "autobind-decorator": "^2.4.0",

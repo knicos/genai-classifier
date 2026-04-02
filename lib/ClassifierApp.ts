@@ -179,13 +179,12 @@ export default class ClassifierApp extends EE<ClassifierAppEvents> {
 
         newModel.setLabels(labels);
 
-        const promises = samples.map((s, ix) => {
-            return s.map((ss) => {
-                return newModel.addExample(ix, ss.data);
-            });
-        });
-
-        await Promise.all(promises.flat());
+        for (let c = 0; c < samples.length; ++c) {
+            const samplesForClass = samples[c];
+            for (const sample of samplesForClass) {
+                await newModel.addExample(c, sample.data);
+            }
+        }
 
         try {
             await newModel.train(

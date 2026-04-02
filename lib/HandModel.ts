@@ -126,7 +126,8 @@ export default class HandModel implements TeachableModel {
 
     public async predict(image: HTMLCanvasElement): Promise<ExplainedPredictionsOutput> {
         if (!this.trained || this._disposed) return { predictions: [] };
-        if (!this.model) return { predictions: [] };
+        if (!this.model || this.busy) return { predictions: [] };
+        this.busy = true;
 
         let allHands: HandLike[];
         let jointHandOutput: Float32Array;
@@ -138,8 +139,10 @@ export default class HandModel implements TeachableModel {
             this.lastHands = allHands;
         } catch {
             this.lastHands = [];
+            this.busy = false;
             return { predictions: [] };
         }
+        this.busy = false;
 
         if (this._disposed || !this.model) return { predictions: [] };
 
@@ -154,8 +157,10 @@ export default class HandModel implements TeachableModel {
     public async train(params: TrainingParameters, callbacks: tf.CustomCallbackArgs) {
         this.trained = false;
         if (this.model) {
+            this.busy = true;
             return this.model.train(params, callbacks).then((m) => {
                 this.trained = true;
+                this.busy = false;
                 return m;
             });
         }
@@ -171,13 +176,10 @@ export default class HandModel implements TeachableModel {
             throw new Error('invalid_sample_type');
         }
 
-        const attempts: string[] = [];
         let result = await this.model.estimateHand(image, false);
-        attempts.push(`original:flip=false:${image.width}x${image.height}`);
 
         if (!result.allHands.length) {
             result = await this.model.estimateHand(image, true);
-            attempts.push(`original:flip=true:${image.width}x${image.height}`);
         }
 
         this.model.addExample(className, result.jointHandOutput);
@@ -188,11 +190,7 @@ export default class HandModel implements TeachableModel {
 
         if (this.model) {
             try {
-                if (this.model.isTrained) {
-                    this.model.dispose();
-                } else {
-                    this.model.model?.dispose();
-                }
+                this.model.dispose();
             } catch (error) {
                 console.warn('Error disposing hand model:', error);
             }

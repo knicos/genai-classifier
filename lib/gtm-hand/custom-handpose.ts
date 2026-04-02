@@ -15,13 +15,9 @@
  * =============================================================================
  */
 
+import '@mediapipe/hands';
 import * as handPoseDetection from '@tensorflow-models/hand-pose-detection';
-import type {
-    Hand,
-    HandDetector,
-    Keypoint,
-    MediaPipeHandsTfjsModelConfig,
-} from '@tensorflow-models/hand-pose-detection';
+import type { Hand, HandDetector, Keypoint } from '@tensorflow-models/hand-pose-detection';
 import * as tf from '@tensorflow/tfjs';
 import { version } from './version';
 
@@ -73,6 +69,7 @@ const DEFAULT_FULL_DETECTOR_MODEL_URL = 'https://store.gen-ai.fi/tm/models/handp
 const DEFAULT_FULL_LANDMARK_MODEL_URL = 'https://store.gen-ai.fi/tm/models/handpose_full_landmark/model.json';
 const DEFAULT_LITE_DETECTOR_MODEL_URL = 'https://store.gen-ai.fi/tm/models/handpose_lite_detector/model.json';
 const DEFAULT_LITE_LANDMARK_MODEL_URL = 'https://store.gen-ai.fi/tm/models/handpose_lite_landmark/model.json';
+const HANDS_SOLUTION_PATH = 'https://store.gen-ai.fi/tm/models/hands';
 
 const fillMetadata = (data: Partial<Metadata>): Metadata => {
     data.packageVersion = data.packageVersion || version;
@@ -227,7 +224,7 @@ export class CustomHandPose {
     }> {
         const staticImageMode = true;
 
-        if (staticImageMode) {
+        /*if (staticImageMode) {
             const detectorWithReset = this.handDetector as HandDetector & { reset?: () => void };
             if (typeof detectorWithReset.reset === 'function') {
                 try {
@@ -236,7 +233,9 @@ export class CustomHandPose {
                     console.warn('[HandPose] Failed to reset detector state before static-image inference', resetError);
                 }
             }
-        }
+        }*/
+
+        //console.log('[HandPose] Estimating hand(s) with MediaPipe Hands');
 
         const detectedHands = await this.handDetector.estimateHands(image, { flipHorizontal, staticImageMode });
         const allHands = detectedHands
@@ -381,12 +380,11 @@ export class CustomHandPose {
 export async function loadHandDetector(config: Partial<HandModelSettings> = {}): Promise<HandDetector> {
     const settings = fillConfig(config);
 
-    const detectorConfig: MediaPipeHandsTfjsModelConfig = {
-        runtime: 'tfjs',
+    const detectorConfig: handPoseDetection.MediaPipeHandsMediaPipeModelConfig = {
+        runtime: 'mediapipe',
         maxHands: settings.maxHands,
         modelType: settings.modelType,
-        detectorModelUrl: settings.detectorModelUrl,
-        landmarkModelUrl: settings.landmarkModelUrl,
+        solutionPath: HANDS_SOLUTION_PATH,
     };
 
     try {
@@ -398,22 +396,16 @@ export async function loadHandDetector(config: Partial<HandModelSettings> = {}):
     } catch (primaryError) {
         console.error('[HandPose] Detector initialization failed', {
             error: errorDetails(primaryError),
-            detectorModelUrl: detectorConfig.detectorModelUrl,
-            landmarkModelUrl: detectorConfig.landmarkModelUrl,
         });
 
         if (detectorConfig.modelType === 'full') {
-            const liteConfig: MediaPipeHandsTfjsModelConfig = {
+            const liteConfig: handPoseDetection.MediaPipeHandsMediaPipeModelConfig = {
                 ...detectorConfig,
                 modelType: 'lite',
-                detectorModelUrl: DEFAULT_LITE_DETECTOR_MODEL_URL,
-                landmarkModelUrl: DEFAULT_LITE_LANDMARK_MODEL_URL,
             };
 
             console.warn('[HandPose] Retrying detector initialization with lite model', {
                 modelType: liteConfig.modelType,
-                detectorModelUrl: liteConfig.detectorModelUrl,
-                landmarkModelUrl: liteConfig.landmarkModelUrl,
             });
 
             try {
@@ -425,8 +417,6 @@ export async function loadHandDetector(config: Partial<HandModelSettings> = {}):
             } catch (fallbackError) {
                 console.error('[HandPose] Lite fallback detector initialization failed', {
                     error: errorDetails(fallbackError),
-                    detectorModelUrl: liteConfig.detectorModelUrl,
-                    landmarkModelUrl: liteConfig.landmarkModelUrl,
                 });
             }
         }
